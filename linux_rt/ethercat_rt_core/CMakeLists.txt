@@ -37,9 +37,12 @@ if(UNIX AND NOT APPLE AND ECAT_RT_CORE_ENABLE_IGH)
 
   add_executable(ethercat_igh_lts_monitor
     src/igh_lts_monitor.c
+    src/motion_cia402.c
+    include/motion_cia402.h
   )
 
   target_include_directories(ethercat_igh_lts_monitor PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${ECAT_IGH_INCLUDE_DIR}"
   )
 

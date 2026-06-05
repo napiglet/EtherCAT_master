@@ -160,6 +160,12 @@ rt{min/avg/max=.../.../...us jitter_max=...us}
 
 The default monitor remains safe and writes `controlword=0x0000`. CiA402
 commands are sent only when one of the explicit sequence options is used.
+The reusable state parser and Controlword generator live in:
+
+```text
+linux_rt/ethercat_rt_core/include/motion_cia402.h
+linux_rt/ethercat_rt_core/src/motion_cia402.c
+```
 
 Recommended order while the motor is not connected:
 
@@ -209,6 +215,6 @@ After the PDO monitor is stable:
 
 1. Move the IgH loop into the TCP backend runtime.
 2. Add a command/status double buffer between TCP and the RT loop.
-3. Add CiA402 fault reset, shutdown, switch-on, enable-operation sequencing.
+3. Reuse `motion_cia402` inside the backend runtime.
 4. Add jog, profile-position, homing, stop, and safety limit handling.
 5. Route Windows GUI/DLL commands to the Linux RT backend.

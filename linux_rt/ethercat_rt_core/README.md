@@ -38,6 +38,9 @@ application interface and the PDO map confirmed from `LTS_MotorDriver1x`:
 - Vendor ID: `0x0000205e`
 - Product Code: `0x90000300`
 
+The shared CiA402 state parser and Controlword sequence generator are in
+`include/motion_cia402.h` and `src/motion_cia402.c`.
+
 Build on the Xenomai mini PC:
 
 ```bash
