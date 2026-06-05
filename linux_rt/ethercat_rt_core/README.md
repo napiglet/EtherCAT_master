@@ -78,5 +78,7 @@ sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
 The expected first milestone is stable output like:
 
 ```text
-wkc=.../COMPLETE master{slaves=1 ... link=1} slave{online=1 op=1 al=0x8}
+wkc=.../COMPLETE master{slaves=1 ... link=1} slave{online=1 op=1 al=0x8} err{wkc=0 state=0}
+sw=0x1221/ReadyToSwitchOn mode=8/CSP
+rt{min/avg/max=.../.../...us jitter_max=...us}
 ```

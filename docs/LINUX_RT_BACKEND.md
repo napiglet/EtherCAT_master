@@ -145,6 +145,15 @@ Expected milestone:
 ```text
 slave{online=1 op=1 al=0x8}
 wkc=.../COMPLETE
+err{wkc=0 state=0}
+```
+
+The monitor also prints CiA402 state text, mode text, WKC/state error counters,
+and cycle timing statistics:
+
+```text
+sw=0x1221/ReadyToSwitchOn mode=8/CSP
+rt{min/avg/max=.../.../...us jitter_max=...us}
 ```
 
 ## Next Implementation Step

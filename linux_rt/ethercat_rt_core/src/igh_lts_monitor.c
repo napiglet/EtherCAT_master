@@ -1,6 +1,7 @@
 #include <ecrt.h>
 
 #include <errno.h>
+#include <limits.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdint.h>
@@ -299,6 +300,21 @@ static void add_ns(struct timespec *time, int64_t ns)
    }
 }
 
+static int64_t timespec_to_ns(const struct timespec *time)
+{
+   return ((int64_t)time->tv_sec * 1000000000LL) + (int64_t)time->tv_nsec;
+}
+
+static int64_t ns_to_us(int64_t ns)
+{
+   return ns / 1000LL;
+}
+
+static int64_t abs_i64(int64_t value)
+{
+   return value < 0 ? -value : value;
+}
+
 static int setup_realtime(int priority)
 {
    struct sched_param param;
@@ -332,6 +348,64 @@ static const char *wc_state_text(ec_wc_state_t state)
       return "COMPLETE";
    default:
       return "UNKNOWN";
+   }
+}
+
+static const char *cia402_status_text(uint16_t statusword)
+{
+   if ((statusword & 0x004fU) == 0x0000U)
+   {
+      return "NotReady";
+   }
+   if ((statusword & 0x004fU) == 0x0040U)
+   {
+      return "SwitchOnDisabled";
+   }
+   if ((statusword & 0x006fU) == 0x0021U)
+   {
+      return "ReadyToSwitchOn";
+   }
+   if ((statusword & 0x006fU) == 0x0023U)
+   {
+      return "SwitchedOn";
+   }
+   if ((statusword & 0x006fU) == 0x0027U)
+   {
+      return "OperationEnabled";
+   }
+   if ((statusword & 0x006fU) == 0x0007U)
+   {
+      return "QuickStopActive";
+   }
+   if ((statusword & 0x004fU) == 0x000fU)
+   {
+      return "FaultReactionActive";
+   }
+   if ((statusword & 0x004fU) == 0x0008U)
+   {
+      return "Fault";
+   }
+   return "Unknown";
+}
+
+static const char *cia402_mode_text(int8_t mode)
+{
+   switch (mode)
+   {
+   case 1:
+      return "PP";
+   case 3:
+      return "PV";
+   case 6:
+      return "HM";
+   case 8:
+      return "CSP";
+   case 9:
+      return "CSV";
+   case 10:
+      return "CST";
+   default:
+      return "-";
    }
 }
 
@@ -380,7 +454,18 @@ int main(int argc, char **argv)
    ec_slave_config_state_t sc_state;
    uint8_t *domain_pd = NULL;
    struct timespec wakeup_time;
+   struct timespec loop_time;
+   struct timespec previous_loop_time;
    int64_t period_ns;
+   int64_t min_loop_us = LLONG_MAX;
+   int64_t max_loop_us = 0;
+   int64_t sum_loop_us = 0;
+   int64_t max_period_error_us = 0;
+   int timing_samples = 0;
+   unsigned int expected_wkc = 0;
+   int wkc_errors = 0;
+   int state_errors = 0;
+   int op_seen = 0;
    int cycle = 0;
    int parse_result;
    int result = 1;
@@ -493,6 +578,7 @@ int main(int argc, char **argv)
 
    period_ns = (int64_t)options.period_us * 1000LL;
    clock_gettime(CLOCK_MONOTONIC, &wakeup_time);
+   previous_loop_time = wakeup_time;
    add_ns(&wakeup_time, period_ns);
 
    while (!G_stop)
@@ -507,6 +593,31 @@ int main(int argc, char **argv)
          break;
       }
 
+      clock_gettime(CLOCK_MONOTONIC, &loop_time);
+      if (cycle > 0)
+      {
+         int64_t elapsed_us =
+            ns_to_us(timespec_to_ns(&loop_time) -
+                     timespec_to_ns(&previous_loop_time));
+         int64_t period_error_us = abs_i64(elapsed_us - options.period_us);
+
+         if (elapsed_us < min_loop_us)
+         {
+            min_loop_us = elapsed_us;
+         }
+         if (elapsed_us > max_loop_us)
+         {
+            max_loop_us = elapsed_us;
+         }
+         if (period_error_us > max_period_error_us)
+         {
+            max_period_error_us = period_error_us;
+         }
+         sum_loop_us += elapsed_us;
+         ++timing_samples;
+      }
+      previous_loop_time = loop_time;
+
       ecrt_master_receive(master);
       ecrt_domain_process(domain);
 
@@ -520,17 +631,47 @@ int main(int argc, char **argv)
       actual_velocity = EC_READ_S32(domain_pd + off.actual_velocity);
       mode_display = EC_READ_S8(domain_pd + off.mode_display);
 
+      memset(&domain_state, 0, sizeof(domain_state));
+      memset(&master_state, 0, sizeof(master_state));
+      memset(&sc_state, 0, sizeof(sc_state));
+      (void)ecrt_domain_state(domain, &domain_state);
+      (void)ecrt_master_state(master, &master_state);
+      (void)ecrt_slave_config_state(sc, &sc_state);
+
+      if (domain_state.wc_state == EC_WC_COMPLETE &&
+          domain_state.working_counter > 0U &&
+          expected_wkc == 0U)
+      {
+         expected_wkc = domain_state.working_counter;
+      }
+      else if (expected_wkc > 0U &&
+               (domain_state.wc_state != EC_WC_COMPLETE ||
+                domain_state.working_counter != expected_wkc))
+      {
+         ++wkc_errors;
+      }
+
+      if (sc_state.operational)
+      {
+         op_seen = 1;
+      }
+      else if (op_seen)
+      {
+         ++state_errors;
+      }
+
       if (cycle % options.print_every == 0)
       {
-         memset(&domain_state, 0, sizeof(domain_state));
-         memset(&master_state, 0, sizeof(master_state));
-         memset(&sc_state, 0, sizeof(sc_state));
-         (void)ecrt_domain_state(domain, &domain_state);
-         (void)ecrt_master_state(master, &master_state);
-         (void)ecrt_slave_config_state(sc, &sc_state);
+         int64_t avg_loop_us =
+            timing_samples > 0 ? (sum_loop_us / timing_samples) : 0;
+         int64_t print_min_loop_us =
+            timing_samples > 0 ? min_loop_us : 0;
 
          printf("cyc=%d wkc=%u/%s master{slaves=%u al=0x%x link=%u} "
-                "slave{online=%u op=%u al=0x%x} sw=0x%04x pos=%d vel=%d mode=%d\n",
+                "slave{online=%u op=%u al=0x%x} "
+                "sw=0x%04x/%s pos=%d vel=%d mode=%d/%s "
+                "rt{min/avg/max=%lld/%lld/%lldus jitter_max=%lldus} "
+                "err{wkc=%d state=%d}\n",
                 cycle,
                 domain_state.working_counter,
                 wc_state_text(domain_state.wc_state),
@@ -541,9 +682,17 @@ int main(int argc, char **argv)
                 sc_state.operational,
                 sc_state.al_state,
                 statusword,
+                cia402_status_text(statusword),
                 actual_position,
                 actual_velocity,
-                mode_display);
+                mode_display,
+                cia402_mode_text(mode_display),
+                (long long)print_min_loop_us,
+                (long long)avg_loop_us,
+                (long long)max_loop_us,
+                (long long)max_period_error_us,
+                wkc_errors,
+                state_errors);
       }
 
       ecrt_domain_queue(domain);
@@ -557,6 +706,25 @@ int main(int argc, char **argv)
    result = 0;
 
 out:
+   if (result == 0)
+   {
+      int64_t avg_loop_us =
+         timing_samples > 0 ? (sum_loop_us / timing_samples) : 0;
+      int64_t print_min_loop_us =
+         timing_samples > 0 ? min_loop_us : 0;
+
+      printf("summary: cycles=%d expected_wkc=%u wkc_errors=%d state_errors=%d "
+             "cycle_us{min=%lld avg=%lld max=%lld jitter_max=%lld}\n",
+             cycle,
+             expected_wkc,
+             wkc_errors,
+             state_errors,
+             (long long)print_min_loop_us,
+             (long long)avg_loop_us,
+             (long long)max_loop_us,
+             (long long)max_period_error_us);
+   }
+
    if (master != NULL)
    {
       ecrt_release_master(master);
