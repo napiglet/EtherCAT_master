@@ -102,6 +102,23 @@ const char *cia402_sequence_text(Cia402Sequence sequence)
    }
 }
 
+const char *cia402_motion_text(Cia402MotionType type)
+{
+   switch (type)
+   {
+   case CIA402_MOTION_SERVO_STOP:
+      return "ServoStop";
+   case CIA402_MOTION_JOG_VELOCITY:
+      return "JogVelocity";
+   case CIA402_MOTION_PROFILE_POSITION:
+      return "ProfilePosition";
+   case CIA402_MOTION_HOME:
+      return "Home";
+   default:
+      return "None";
+   }
+}
+
 uint16_t cia402_sequence_controlword(Cia402Sequence sequence,
                                      Cia402State state,
                                      uint16_t manual_controlword,
@@ -200,5 +217,77 @@ uint16_t cia402_sequence_controlword(Cia402Sequence sequence,
 
    default:
       return manual_controlword;
+   }
+}
+
+void cia402_motion_init(Cia402MotionCommand *command)
+{
+   if (command == 0)
+   {
+      return;
+   }
+
+   command->type = CIA402_MOTION_NONE;
+   command->target_position = 0;
+   command->target_velocity = 0;
+   command->profile_velocity = 0;
+   command->mode = 0;
+   command->pulse_cycles = 20;
+}
+
+void cia402_motion_apply(const Cia402MotionCommand *command,
+                         int sequence_done,
+                         int cycle_after_sequence,
+                         Cia402PdoOutput *output)
+{
+   int new_setpoint;
+
+   if (command == 0 || output == 0 || command->type == CIA402_MOTION_NONE)
+   {
+      return;
+   }
+
+   if (command->type == CIA402_MOTION_SERVO_STOP)
+   {
+      output->controlword = 0x010fU;
+      output->target_velocity = 0;
+      if (output->mode == 0)
+      {
+         output->mode = CIA402_MODE_CSV;
+      }
+      return;
+   }
+
+   if (!sequence_done)
+   {
+      return;
+   }
+
+   switch (command->type)
+   {
+   case CIA402_MOTION_JOG_VELOCITY:
+      output->controlword = 0x000fU;
+      output->target_velocity = command->target_velocity;
+      output->mode = command->mode != 0 ? command->mode : CIA402_MODE_CSV;
+      break;
+
+   case CIA402_MOTION_PROFILE_POSITION:
+      new_setpoint =
+         cycle_after_sequence >= 0 &&
+         cycle_after_sequence < command->pulse_cycles;
+      output->controlword = (uint16_t)(0x000fU | (new_setpoint ? 0x0010U : 0));
+      output->target_position = command->target_position;
+      output->target_velocity = command->profile_velocity;
+      output->mode = command->mode != 0 ? command->mode : CIA402_MODE_PROFILE_POSITION;
+      break;
+
+   case CIA402_MOTION_HOME:
+      output->controlword = 0x001fU;
+      output->target_velocity = command->target_velocity;
+      output->mode = CIA402_MODE_HOMING;
+      break;
+
+   default:
+      break;
    }
 }

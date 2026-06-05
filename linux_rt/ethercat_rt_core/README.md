@@ -110,3 +110,26 @@ sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
 
 Use `--cia402-enable` only as an explicit bench test. A drive can reject
 `OperationEnabled` while the motor, power stage, or interlocks are not ready.
+
+Motion command structure tests:
+
+```bash
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 5000 \
+  --print-every 1000 \
+  --servo-stop
+
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 5000 \
+  --print-every 1000 \
+  --jog-velocity 10
+
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 5000 \
+  --print-every 1000 \
+  --profile-position 100 \
+  --profile-velocity 10
+```

@@ -209,6 +209,63 @@ cw=0x0007 seq{SwitchOn done=1 fail=0 done_cyc=...}
 cw=0x000f seq{EnableOperation done=0 fail=1 done_cyc=-1}
 ```
 
+## Motion Command Structure Tests
+
+The motion command structure is available through `motion_cia402` and explicit
+monitor options. Jog/Profile/Home automatically run `EnableOperation` first if
+no sequence option is supplied.
+
+Safe stop/halt output:
+
+```bash
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 5000 \
+  --print-every 1000 \
+  --servo-stop
+```
+
+Jog velocity test. Use a very small velocity until the real motor/stator setup
+is ready:
+
+```bash
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 5000 \
+  --print-every 1000 \
+  --jog-velocity 10
+```
+
+Profile position command structure test:
+
+```bash
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 5000 \
+  --print-every 1000 \
+  --profile-position 100 \
+  --profile-velocity 10
+```
+
+Homing command structure test:
+
+```bash
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 5000 \
+  --print-every 1000 \
+  --home \
+  --home-velocity 10
+```
+
+Expected motion log fields:
+
+```text
+seq{EnableOperation done=1 fail=0}
+out{tp=... tv=... mode=... motion=JogVelocity}
+err{wkc=0 state=0}
+```
+
 ## Next Implementation Step
 
 After the PDO monitor is stable:
@@ -216,5 +273,6 @@ After the PDO monitor is stable:
 1. Move the IgH loop into the TCP backend runtime.
 2. Add a command/status double buffer between TCP and the RT loop.
 3. Reuse `motion_cia402` inside the backend runtime.
-4. Add jog, profile-position, homing, stop, and safety limit handling.
+4. Add backend command handling for jog, profile-position, homing, stop, and
+   safety limits.
 5. Route Windows GUI/DLL commands to the Linux RT backend.

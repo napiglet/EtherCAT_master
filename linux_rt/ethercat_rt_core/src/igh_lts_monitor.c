@@ -50,6 +50,7 @@ typedef struct MonitorOptions
    int configure_pdos;
    Cia402Sequence sequence;
    int sequence_timeout_ms;
+   Cia402MotionCommand motion;
 } MonitorOptions;
 
 static volatile sig_atomic_t G_stop;
@@ -166,6 +167,13 @@ static void usage(const char *argv0)
    printf("  --cia402-disable     Run CiA402 disable-voltage sequence.\n");
    printf("  --sequence-timeout-ms N  Sequence timeout. Default: %d\n",
           DEFAULT_SEQUENCE_TIMEOUT_MS);
+   printf("  --servo-stop         Send safe halt/stop PDO command.\n");
+   printf("  --jog-velocity N     Enable then run CSV jog with target velocity N.\n");
+   printf("  --profile-position N Enable then run PP move to target position N.\n");
+   printf("  --profile-velocity N Profile velocity used with --profile-position.\n");
+   printf("  --home               Enable then run Homing mode command.\n");
+   printf("  --home-velocity N    Velocity field used with --home.\n");
+   printf("  --motion-pulse-cycles N  PP new-setpoint pulse cycles. Default: 20\n");
    printf("  --help               Show this help.\n");
 }
 
@@ -182,6 +190,7 @@ static int parse_options(int argc, char **argv, MonitorOptions *options)
    options->configure_pdos = 1;
    options->sequence = CIA402_SEQ_NONE;
    options->sequence_timeout_ms = DEFAULT_SEQUENCE_TIMEOUT_MS;
+   cia402_motion_init(&options->motion);
 
    for (i = 1; i < argc; ++i)
    {
@@ -322,6 +331,60 @@ static int parse_options(int argc, char **argv, MonitorOptions *options)
             return -1;
          }
       }
+      else if (strcmp(argv[i], "--servo-stop") == 0)
+      {
+         options->motion.type = CIA402_MOTION_SERVO_STOP;
+      }
+      else if (strcmp(argv[i], "--jog-velocity") == 0 && i + 1 < argc)
+      {
+         if (parse_i32(argv[++i], &options->motion.target_velocity) != 0)
+         {
+            fprintf(stderr, "Invalid --jog-velocity value.\n");
+            return -1;
+         }
+         options->motion.type = CIA402_MOTION_JOG_VELOCITY;
+         options->motion.mode = CIA402_MODE_CSV;
+      }
+      else if (strcmp(argv[i], "--profile-position") == 0 && i + 1 < argc)
+      {
+         if (parse_i32(argv[++i], &options->motion.target_position) != 0)
+         {
+            fprintf(stderr, "Invalid --profile-position value.\n");
+            return -1;
+         }
+         options->motion.type = CIA402_MOTION_PROFILE_POSITION;
+         options->motion.mode = CIA402_MODE_PROFILE_POSITION;
+      }
+      else if (strcmp(argv[i], "--profile-velocity") == 0 && i + 1 < argc)
+      {
+         if (parse_i32(argv[++i], &options->motion.profile_velocity) != 0)
+         {
+            fprintf(stderr, "Invalid --profile-velocity value.\n");
+            return -1;
+         }
+      }
+      else if (strcmp(argv[i], "--home") == 0)
+      {
+         options->motion.type = CIA402_MOTION_HOME;
+         options->motion.mode = CIA402_MODE_HOMING;
+      }
+      else if (strcmp(argv[i], "--home-velocity") == 0 && i + 1 < argc)
+      {
+         if (parse_i32(argv[++i], &options->motion.target_velocity) != 0)
+         {
+            fprintf(stderr, "Invalid --home-velocity value.\n");
+            return -1;
+         }
+      }
+      else if (strcmp(argv[i], "--motion-pulse-cycles") == 0 && i + 1 < argc)
+      {
+         if (parse_int(argv[++i], &options->motion.pulse_cycles) != 0 ||
+             options->motion.pulse_cycles <= 0)
+         {
+            fprintf(stderr, "Invalid --motion-pulse-cycles value.\n");
+            return -1;
+         }
+      }
       else
       {
          fprintf(stderr, "Unknown or incomplete option: %s\n", argv[i]);
@@ -425,6 +488,11 @@ static void print_startup(const MonitorOptions *options, const ec_slave_info_t *
    printf("  CiA402 sequence: %s, timeout=%d ms\n",
           cia402_sequence_text(options->sequence),
           options->sequence_timeout_ms);
+   printf("  Motion command: %s, target_pos=%d, target_vel=%d, profile_vel=%d\n",
+          cia402_motion_text(options->motion.type),
+          options->motion.target_position,
+          options->motion.target_velocity,
+          options->motion.profile_velocity);
 }
 
 int main(int argc, char **argv)
@@ -474,6 +542,15 @@ int main(int argc, char **argv)
 
    sequence_done = options.sequence == CIA402_SEQ_NONE ? 1 : 0;
    command_controlword = options.controlword;
+
+   if (options.sequence == CIA402_SEQ_NONE &&
+       (options.motion.type == CIA402_MOTION_JOG_VELOCITY ||
+        options.motion.type == CIA402_MOTION_PROFILE_POSITION ||
+        options.motion.type == CIA402_MOTION_HOME))
+   {
+      options.sequence = CIA402_SEQ_ENABLE;
+      sequence_done = 0;
+   }
 
    signal(SIGINT, on_signal);
    signal(SIGTERM, on_signal);
@@ -584,6 +661,8 @@ int main(int argc, char **argv)
       int8_t mode_display;
       Cia402State drive_state;
       int sequence_target_reached = 0;
+      int cycle_after_sequence = -1;
+      Cia402PdoOutput pdo_output;
 
       if (options.max_cycles > 0 && cycle >= options.max_cycles)
       {
@@ -671,10 +750,25 @@ int main(int argc, char **argv)
          sequence_failed = 1;
       }
 
-      EC_WRITE_U16(domain_pd + off.controlword, command_controlword);
-      EC_WRITE_S32(domain_pd + off.target_position, options.target_position);
-      EC_WRITE_S32(domain_pd + off.target_velocity, options.target_velocity);
-      EC_WRITE_S8(domain_pd + off.mode_of_operation, options.mode);
+      if (sequence_done_cycle >= 0)
+      {
+         cycle_after_sequence = cycle - sequence_done_cycle;
+      }
+
+      pdo_output.controlword = command_controlword;
+      pdo_output.target_position = options.target_position;
+      pdo_output.target_velocity = options.target_velocity;
+      pdo_output.mode = options.mode;
+      cia402_motion_apply(&options.motion,
+                          sequence_done && !sequence_failed,
+                          cycle_after_sequence,
+                          &pdo_output);
+      command_controlword = pdo_output.controlword;
+
+      EC_WRITE_U16(domain_pd + off.controlword, pdo_output.controlword);
+      EC_WRITE_S32(domain_pd + off.target_position, pdo_output.target_position);
+      EC_WRITE_S32(domain_pd + off.target_velocity, pdo_output.target_velocity);
+      EC_WRITE_S8(domain_pd + off.mode_of_operation, pdo_output.mode);
 
       if (cycle % options.print_every == 0)
       {
@@ -686,6 +780,7 @@ int main(int argc, char **argv)
          printf("cyc=%d wkc=%u/%s master{slaves=%u al=0x%x link=%u} "
                 "slave{online=%u op=%u al=0x%x} "
                 "sw=0x%04x/%s cw=0x%04x pos=%d vel=%d mode=%d/%s "
+                "out{tp=%d tv=%d mode=%d/%s motion=%s} "
                 "seq{%s done=%d fail=%d done_cyc=%d} "
                 "rt{min/avg/max=%lld/%lld/%lldus jitter_max=%lldus} "
                 "err{wkc=%d state=%d}\n",
@@ -705,6 +800,11 @@ int main(int argc, char **argv)
                 actual_velocity,
                 mode_display,
                 cia402_mode_text(mode_display),
+                pdo_output.target_position,
+                pdo_output.target_velocity,
+                pdo_output.mode,
+                cia402_mode_text(pdo_output.mode),
+                cia402_motion_text(options.motion.type),
                 cia402_sequence_text(options.sequence),
                 sequence_done,
                 sequence_failed,
@@ -736,7 +836,7 @@ out:
          timing_samples > 0 ? min_loop_us : 0;
 
       printf("summary: cycles=%d expected_wkc=%u wkc_errors=%d state_errors=%d "
-             "sequence{%s done=%d fail=%d done_cyc=%d} "
+             "sequence{%s done=%d fail=%d done_cyc=%d} motion{%s} "
              "cycle_us{min=%lld avg=%lld max=%lld jitter_max=%lld}\n",
              cycle,
              expected_wkc,
@@ -746,6 +846,7 @@ out:
              sequence_done,
              sequence_failed,
              sequence_done_cycle,
+             cia402_motion_text(options.motion.type),
              (long long)print_min_loop_us,
              (long long)avg_loop_us,
              (long long)max_loop_us,
