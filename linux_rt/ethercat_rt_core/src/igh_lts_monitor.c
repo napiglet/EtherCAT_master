@@ -16,6 +16,7 @@
 #define LTS_PRODUCT_CODE 0x90000300u
 #define DEFAULT_PERIOD_US 1000
 #define DEFAULT_PRINT_EVERY 1000
+#define DEFAULT_SEQUENCE_TIMEOUT_MS 5000
 
 typedef struct LtsOffsets
 {
@@ -28,6 +29,29 @@ typedef struct LtsOffsets
    unsigned int actual_velocity;
    unsigned int mode_display;
 } LtsOffsets;
+
+typedef enum Cia402State
+{
+   CIA402_STATE_NOT_READY = 0,
+   CIA402_STATE_SWITCH_ON_DISABLED,
+   CIA402_STATE_READY_TO_SWITCH_ON,
+   CIA402_STATE_SWITCHED_ON,
+   CIA402_STATE_OPERATION_ENABLED,
+   CIA402_STATE_QUICK_STOP_ACTIVE,
+   CIA402_STATE_FAULT_REACTION_ACTIVE,
+   CIA402_STATE_FAULT,
+   CIA402_STATE_UNKNOWN
+} Cia402State;
+
+typedef enum Cia402Sequence
+{
+   CIA402_SEQ_NONE = 0,
+   CIA402_SEQ_FAULT_RESET,
+   CIA402_SEQ_SHUTDOWN,
+   CIA402_SEQ_SWITCH_ON,
+   CIA402_SEQ_ENABLE,
+   CIA402_SEQ_DISABLE
+} Cia402Sequence;
 
 typedef struct MonitorOptions
 {
@@ -45,6 +69,8 @@ typedef struct MonitorOptions
    int8_t mode;
    int priority;
    int configure_pdos;
+   Cia402Sequence sequence;
+   int sequence_timeout_ms;
 } MonitorOptions;
 
 static volatile sig_atomic_t G_stop;
@@ -154,6 +180,13 @@ static void usage(const char *argv0)
    printf("  --mode N             Output CiA402 mode. Default: 0\n");
    printf("  --priority N         SCHED_FIFO priority. Default: 80\n");
    printf("  --use-sii-pdos       Use the slave/default SII PDO map without rewriting it.\n");
+   printf("  --fault-reset        Run CiA402 fault reset sequence.\n");
+   printf("  --cia402-shutdown    Run CiA402 shutdown sequence to ReadyToSwitchOn.\n");
+   printf("  --cia402-switch-on   Run CiA402 switch-on sequence to SwitchedOn.\n");
+   printf("  --cia402-enable      Run CiA402 enable-operation sequence.\n");
+   printf("  --cia402-disable     Run CiA402 disable-voltage sequence.\n");
+   printf("  --sequence-timeout-ms N  Sequence timeout. Default: %d\n",
+          DEFAULT_SEQUENCE_TIMEOUT_MS);
    printf("  --help               Show this help.\n");
 }
 
@@ -168,6 +201,8 @@ static int parse_options(int argc, char **argv, MonitorOptions *options)
    options->print_every = DEFAULT_PRINT_EVERY;
    options->priority = 80;
    options->configure_pdos = 1;
+   options->sequence = CIA402_SEQ_NONE;
+   options->sequence_timeout_ms = DEFAULT_SEQUENCE_TIMEOUT_MS;
 
    for (i = 1; i < argc; ++i)
    {
@@ -279,6 +314,35 @@ static int parse_options(int argc, char **argv, MonitorOptions *options)
       {
          options->configure_pdos = 0;
       }
+      else if (strcmp(argv[i], "--fault-reset") == 0)
+      {
+         options->sequence = CIA402_SEQ_FAULT_RESET;
+      }
+      else if (strcmp(argv[i], "--cia402-shutdown") == 0)
+      {
+         options->sequence = CIA402_SEQ_SHUTDOWN;
+      }
+      else if (strcmp(argv[i], "--cia402-switch-on") == 0)
+      {
+         options->sequence = CIA402_SEQ_SWITCH_ON;
+      }
+      else if (strcmp(argv[i], "--cia402-enable") == 0)
+      {
+         options->sequence = CIA402_SEQ_ENABLE;
+      }
+      else if (strcmp(argv[i], "--cia402-disable") == 0)
+      {
+         options->sequence = CIA402_SEQ_DISABLE;
+      }
+      else if (strcmp(argv[i], "--sequence-timeout-ms") == 0 && i + 1 < argc)
+      {
+         if (parse_int(argv[++i], &options->sequence_timeout_ms) != 0 ||
+             options->sequence_timeout_ms <= 0)
+         {
+            fprintf(stderr, "Invalid --sequence-timeout-ms value.\n");
+            return -1;
+         }
+      }
       else
       {
          fprintf(stderr, "Unknown or incomplete option: %s\n", argv[i]);
@@ -351,41 +415,66 @@ static const char *wc_state_text(ec_wc_state_t state)
    }
 }
 
-static const char *cia402_status_text(uint16_t statusword)
+static Cia402State cia402_state_from_status(uint16_t statusword)
 {
    if ((statusword & 0x004fU) == 0x0000U)
    {
-      return "NotReady";
+      return CIA402_STATE_NOT_READY;
    }
    if ((statusword & 0x004fU) == 0x0040U)
    {
-      return "SwitchOnDisabled";
+      return CIA402_STATE_SWITCH_ON_DISABLED;
    }
    if ((statusword & 0x006fU) == 0x0021U)
    {
-      return "ReadyToSwitchOn";
+      return CIA402_STATE_READY_TO_SWITCH_ON;
    }
    if ((statusword & 0x006fU) == 0x0023U)
    {
-      return "SwitchedOn";
+      return CIA402_STATE_SWITCHED_ON;
    }
    if ((statusword & 0x006fU) == 0x0027U)
    {
-      return "OperationEnabled";
+      return CIA402_STATE_OPERATION_ENABLED;
    }
    if ((statusword & 0x006fU) == 0x0007U)
    {
-      return "QuickStopActive";
+      return CIA402_STATE_QUICK_STOP_ACTIVE;
    }
    if ((statusword & 0x004fU) == 0x000fU)
    {
-      return "FaultReactionActive";
+      return CIA402_STATE_FAULT_REACTION_ACTIVE;
    }
    if ((statusword & 0x004fU) == 0x0008U)
    {
-      return "Fault";
+      return CIA402_STATE_FAULT;
    }
-   return "Unknown";
+   return CIA402_STATE_UNKNOWN;
+}
+
+static const char *cia402_status_text(Cia402State state)
+{
+   switch (state)
+   {
+   case CIA402_STATE_NOT_READY:
+      return "NotReady";
+   case CIA402_STATE_SWITCH_ON_DISABLED:
+      return "SwitchOnDisabled";
+   case CIA402_STATE_READY_TO_SWITCH_ON:
+      return "ReadyToSwitchOn";
+   case CIA402_STATE_SWITCHED_ON:
+      return "SwitchedOn";
+   case CIA402_STATE_OPERATION_ENABLED:
+      return "OperationEnabled";
+   case CIA402_STATE_QUICK_STOP_ACTIVE:
+      return "QuickStopActive";
+   case CIA402_STATE_FAULT_REACTION_ACTIVE:
+      return "FaultReactionActive";
+   case CIA402_STATE_FAULT:
+      return "Fault";
+   default:
+      return "Unknown";
+   }
 }
 
 static const char *cia402_mode_text(int8_t mode)
@@ -406,6 +495,126 @@ static const char *cia402_mode_text(int8_t mode)
       return "CST";
    default:
       return "-";
+   }
+}
+
+static const char *cia402_sequence_text(Cia402Sequence sequence)
+{
+   switch (sequence)
+   {
+   case CIA402_SEQ_FAULT_RESET:
+      return "FaultReset";
+   case CIA402_SEQ_SHUTDOWN:
+      return "Shutdown";
+   case CIA402_SEQ_SWITCH_ON:
+      return "SwitchOn";
+   case CIA402_SEQ_ENABLE:
+      return "EnableOperation";
+   case CIA402_SEQ_DISABLE:
+      return "DisableVoltage";
+   default:
+      return "None";
+   }
+}
+
+static uint16_t cia402_sequence_controlword(Cia402Sequence sequence,
+                                            Cia402State state,
+                                            uint16_t manual_controlword,
+                                            int *target_reached)
+{
+   if (target_reached != NULL)
+   {
+      *target_reached = 0;
+   }
+
+   switch (sequence)
+   {
+   case CIA402_SEQ_NONE:
+      if (target_reached != NULL)
+      {
+         *target_reached = 1;
+      }
+      return manual_controlword;
+
+   case CIA402_SEQ_FAULT_RESET:
+      if (state == CIA402_STATE_FAULT ||
+          state == CIA402_STATE_FAULT_REACTION_ACTIVE)
+      {
+         return 0x0080U;
+      }
+      if (target_reached != NULL)
+      {
+         *target_reached = 1;
+      }
+      return 0x0000U;
+
+   case CIA402_SEQ_SHUTDOWN:
+      if (state == CIA402_STATE_READY_TO_SWITCH_ON)
+      {
+         if (target_reached != NULL)
+         {
+            *target_reached = 1;
+         }
+      }
+      return 0x0006U;
+
+   case CIA402_SEQ_SWITCH_ON:
+      if (state == CIA402_STATE_SWITCHED_ON ||
+          state == CIA402_STATE_OPERATION_ENABLED)
+      {
+         if (target_reached != NULL)
+         {
+            *target_reached = 1;
+         }
+         return 0x0007U;
+      }
+      if (state == CIA402_STATE_READY_TO_SWITCH_ON)
+      {
+         return 0x0007U;
+      }
+      if (state == CIA402_STATE_FAULT ||
+          state == CIA402_STATE_FAULT_REACTION_ACTIVE)
+      {
+         return 0x0080U;
+      }
+      return 0x0006U;
+
+   case CIA402_SEQ_ENABLE:
+      if (state == CIA402_STATE_OPERATION_ENABLED)
+      {
+         if (target_reached != NULL)
+         {
+            *target_reached = 1;
+         }
+         return 0x000fU;
+      }
+      if (state == CIA402_STATE_SWITCHED_ON)
+      {
+         return 0x000fU;
+      }
+      if (state == CIA402_STATE_READY_TO_SWITCH_ON)
+      {
+         return 0x0007U;
+      }
+      if (state == CIA402_STATE_FAULT ||
+          state == CIA402_STATE_FAULT_REACTION_ACTIVE)
+      {
+         return 0x0080U;
+      }
+      return 0x0006U;
+
+   case CIA402_SEQ_DISABLE:
+      if (state == CIA402_STATE_SWITCH_ON_DISABLED)
+      {
+         if (target_reached != NULL)
+         {
+            *target_reached = 1;
+         }
+      }
+      return 0x0000U;
+
+   default:
+      return manual_controlword;
    }
 }
 
@@ -437,6 +646,9 @@ static void print_startup(const MonitorOptions *options, const ec_slave_info_t *
           options->mode);
    printf("  PDO config: %s\n",
           options->configure_pdos ? "write SM2/SM3 map" : "use SII/default map");
+   printf("  CiA402 sequence: %s, timeout=%d ms\n",
+          cia402_sequence_text(options->sequence),
+          options->sequence_timeout_ms);
 }
 
 int main(int argc, char **argv)
@@ -466,6 +678,10 @@ int main(int argc, char **argv)
    int wkc_errors = 0;
    int state_errors = 0;
    int op_seen = 0;
+   int sequence_done = 1;
+   int sequence_failed = 0;
+   int sequence_done_cycle = -1;
+   uint16_t command_controlword = 0;
    int cycle = 0;
    int parse_result;
    int result = 1;
@@ -479,6 +695,9 @@ int main(int argc, char **argv)
    {
       return 2;
    }
+
+   sequence_done = options.sequence == CIA402_SEQ_NONE ? 1 : 0;
+   command_controlword = options.controlword;
 
    signal(SIGINT, on_signal);
    signal(SIGTERM, on_signal);
@@ -587,6 +806,8 @@ int main(int argc, char **argv)
       int32_t actual_position;
       int32_t actual_velocity;
       int8_t mode_display;
+      Cia402State drive_state;
+      int sequence_target_reached = 0;
 
       if (options.max_cycles > 0 && cycle >= options.max_cycles)
       {
@@ -621,15 +842,11 @@ int main(int argc, char **argv)
       ecrt_master_receive(master);
       ecrt_domain_process(domain);
 
-      EC_WRITE_U16(domain_pd + off.controlword, options.controlword);
-      EC_WRITE_S32(domain_pd + off.target_position, options.target_position);
-      EC_WRITE_S32(domain_pd + off.target_velocity, options.target_velocity);
-      EC_WRITE_S8(domain_pd + off.mode_of_operation, options.mode);
-
       statusword = EC_READ_U16(domain_pd + off.statusword);
       actual_position = EC_READ_S32(domain_pd + off.actual_position);
       actual_velocity = EC_READ_S32(domain_pd + off.actual_velocity);
       mode_display = EC_READ_S8(domain_pd + off.mode_display);
+      drive_state = cia402_state_from_status(statusword);
 
       memset(&domain_state, 0, sizeof(domain_state));
       memset(&master_state, 0, sizeof(master_state));
@@ -660,6 +877,29 @@ int main(int argc, char **argv)
          ++state_errors;
       }
 
+      command_controlword =
+         cia402_sequence_controlword(options.sequence,
+                                     drive_state,
+                                     options.controlword,
+                                     &sequence_target_reached);
+
+      if (!sequence_done && sequence_target_reached)
+      {
+         sequence_done = 1;
+         sequence_done_cycle = cycle;
+      }
+      if (!sequence_done && !sequence_failed &&
+          (((int64_t)cycle * options.period_us) / 1000LL) >=
+             options.sequence_timeout_ms)
+      {
+         sequence_failed = 1;
+      }
+
+      EC_WRITE_U16(domain_pd + off.controlword, command_controlword);
+      EC_WRITE_S32(domain_pd + off.target_position, options.target_position);
+      EC_WRITE_S32(domain_pd + off.target_velocity, options.target_velocity);
+      EC_WRITE_S8(domain_pd + off.mode_of_operation, options.mode);
+
       if (cycle % options.print_every == 0)
       {
          int64_t avg_loop_us =
@@ -669,7 +909,8 @@ int main(int argc, char **argv)
 
          printf("cyc=%d wkc=%u/%s master{slaves=%u al=0x%x link=%u} "
                 "slave{online=%u op=%u al=0x%x} "
-                "sw=0x%04x/%s pos=%d vel=%d mode=%d/%s "
+                "sw=0x%04x/%s cw=0x%04x pos=%d vel=%d mode=%d/%s "
+                "seq{%s done=%d fail=%d done_cyc=%d} "
                 "rt{min/avg/max=%lld/%lld/%lldus jitter_max=%lldus} "
                 "err{wkc=%d state=%d}\n",
                 cycle,
@@ -682,11 +923,16 @@ int main(int argc, char **argv)
                 sc_state.operational,
                 sc_state.al_state,
                 statusword,
-                cia402_status_text(statusword),
+                cia402_status_text(drive_state),
+                command_controlword,
                 actual_position,
                 actual_velocity,
                 mode_display,
                 cia402_mode_text(mode_display),
+                cia402_sequence_text(options.sequence),
+                sequence_done,
+                sequence_failed,
+                sequence_done_cycle,
                 (long long)print_min_loop_us,
                 (long long)avg_loop_us,
                 (long long)max_loop_us,
@@ -714,11 +960,16 @@ out:
          timing_samples > 0 ? min_loop_us : 0;
 
       printf("summary: cycles=%d expected_wkc=%u wkc_errors=%d state_errors=%d "
+             "sequence{%s done=%d fail=%d done_cyc=%d} "
              "cycle_us{min=%lld avg=%lld max=%lld jitter_max=%lld}\n",
              cycle,
              expected_wkc,
              wkc_errors,
              state_errors,
+             cia402_sequence_text(options.sequence),
+             sequence_done,
+             sequence_failed,
+             sequence_done_cycle,
              (long long)print_min_loop_us,
              (long long)avg_loop_us,
              (long long)max_loop_us,

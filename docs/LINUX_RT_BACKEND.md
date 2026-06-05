@@ -156,6 +156,53 @@ sw=0x1221/ReadyToSwitchOn mode=8/CSP
 rt{min/avg/max=.../.../...us jitter_max=...us}
 ```
 
+## CiA402 State Sequence Tests
+
+The default monitor remains safe and writes `controlword=0x0000`. CiA402
+commands are sent only when one of the explicit sequence options is used.
+
+Recommended order while the motor is not connected:
+
+```bash
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 20000 \
+  --print-every 1000 \
+  --fault-reset
+
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 20000 \
+  --print-every 1000 \
+  --cia402-shutdown
+
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 20000 \
+  --print-every 1000 \
+  --cia402-switch-on
+```
+
+`--cia402-enable` is intentionally separate because a drive may refuse
+`OperationEnabled` while the motor/power stage/interlocks are not connected:
+
+```bash
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 20000 \
+  --print-every 1000 \
+  --cia402-enable \
+  --sequence-timeout-ms 5000
+```
+
+Expected sequence log fields:
+
+```text
+cw=0x0006 seq{Shutdown done=1 fail=0 done_cyc=...}
+cw=0x0007 seq{SwitchOn done=1 fail=0 done_cyc=...}
+cw=0x000f seq{EnableOperation done=0 fail=1 done_cyc=-1}
+```
+
 ## Next Implementation Step
 
 After the PDO monitor is stable:

@@ -82,3 +82,28 @@ wkc=.../COMPLETE master{slaves=1 ... link=1} slave{online=1 op=1 al=0x8} err{wkc
 sw=0x1221/ReadyToSwitchOn mode=8/CSP
 rt{min/avg/max=.../.../...us jitter_max=...us}
 ```
+
+CiA402 sequence options are explicit, so the default monitor stays passive:
+
+```bash
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 20000 \
+  --print-every 1000 \
+  --fault-reset
+
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 20000 \
+  --print-every 1000 \
+  --cia402-shutdown
+
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 20000 \
+  --print-every 1000 \
+  --cia402-switch-on
+```
+
+Use `--cia402-enable` only as an explicit bench test. A drive can reject
+`OperationEnabled` while the motor, power stage, or interlocks are not ready.
