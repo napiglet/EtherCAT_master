@@ -43,6 +43,7 @@ typedef struct MonitorOptions
    int32_t target_velocity;
    int8_t mode;
    int priority;
+   int configure_pdos;
 } MonitorOptions;
 
 static volatile sig_atomic_t G_stop;
@@ -66,11 +67,9 @@ static ec_pdo_info_t G_lts_pdos[] = {
 };
 
 static ec_sync_info_t G_lts_syncs[] = {
-   {0, EC_DIR_OUTPUT, 0, NULL, EC_WD_DISABLE},
-   {1, EC_DIR_INPUT, 0, NULL, EC_WD_DISABLE},
    {2, EC_DIR_OUTPUT, 1, &G_lts_pdos[0], EC_WD_ENABLE},
    {3, EC_DIR_INPUT, 1, &G_lts_pdos[1], EC_WD_DISABLE},
-   {0xff}
+   {0xff, EC_DIR_INVALID, 0, NULL, EC_WD_DEFAULT}
 };
 
 static void on_signal(int sig)
@@ -153,6 +152,7 @@ static void usage(const char *argv0)
    printf("  --target-velocity N  Output target velocity. Default: 0\n");
    printf("  --mode N             Output CiA402 mode. Default: 0\n");
    printf("  --priority N         SCHED_FIFO priority. Default: 80\n");
+   printf("  --use-sii-pdos       Use the slave/default SII PDO map without rewriting it.\n");
    printf("  --help               Show this help.\n");
 }
 
@@ -166,6 +166,7 @@ static int parse_options(int argc, char **argv, MonitorOptions *options)
    options->period_us = DEFAULT_PERIOD_US;
    options->print_every = DEFAULT_PRINT_EVERY;
    options->priority = 80;
+   options->configure_pdos = 1;
 
    for (i = 1; i < argc; ++i)
    {
@@ -273,6 +274,10 @@ static int parse_options(int argc, char **argv, MonitorOptions *options)
             return -1;
          }
       }
+      else if (strcmp(argv[i], "--use-sii-pdos") == 0)
+      {
+         options->configure_pdos = 0;
+      }
       else
       {
          fprintf(stderr, "Unknown or incomplete option: %s\n", argv[i]);
@@ -356,12 +361,15 @@ static void print_startup(const MonitorOptions *options, const ec_slave_info_t *
           options->target_position,
           options->target_velocity,
           options->mode);
+   printf("  PDO config: %s\n",
+          options->configure_pdos ? "write SM2/SM3 map" : "use SII/default map");
 }
 
 int main(int argc, char **argv)
 {
    MonitorOptions options;
    LtsOffsets off;
+   unsigned int bit_positions[8];
    ec_pdo_entry_reg_t regs[9];
    ec_master_t *master = NULL;
    ec_domain_t *domain = NULL;
@@ -391,15 +399,17 @@ int main(int argc, char **argv)
    signal(SIGTERM, on_signal);
 
    memset(&off, 0, sizeof(off));
+   memset(bit_positions, 0, sizeof(bit_positions));
    memset(regs, 0, sizeof(regs));
-   regs[0] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x6040, 0x00, &off.controlword};
-   regs[1] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x607a, 0x00, &off.target_position};
-   regs[2] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x60ff, 0x00, &off.target_velocity};
-   regs[3] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x6060, 0x00, &off.mode_of_operation};
-   regs[4] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x6041, 0x00, &off.statusword};
-   regs[5] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x6064, 0x00, &off.actual_position};
-   regs[6] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x606c, 0x00, &off.actual_velocity};
-   regs[7] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x6061, 0x00, &off.mode_display};
+   regs[0] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x6040, 0x00, &off.controlword, &bit_positions[0]};
+   regs[1] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x607a, 0x00, &off.target_position, &bit_positions[1]};
+   regs[2] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x60ff, 0x00, &off.target_velocity, &bit_positions[2]};
+   regs[3] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x6060, 0x00, &off.mode_of_operation, &bit_positions[3]};
+   regs[4] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x6041, 0x00, &off.statusword, &bit_positions[4]};
+   regs[5] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x6064, 0x00, &off.actual_position, &bit_positions[5]};
+   regs[6] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x606c, 0x00, &off.actual_velocity, &bit_positions[6]};
+   regs[7] = (ec_pdo_entry_reg_t){options.alias, options.position, options.vendor_id, options.product_code, 0x6061, 0x00, &off.mode_display, &bit_positions[7]};
+   regs[8] = (ec_pdo_entry_reg_t){0, 0, 0, 0, 0, 0, NULL, NULL};
 
    master = ecrt_request_master(options.master_index);
    if (master == NULL)
@@ -436,7 +446,8 @@ int main(int argc, char **argv)
       goto out;
    }
 
-   if (ecrt_slave_config_pdos(sc, EC_END, G_lts_syncs) != 0)
+   if (options.configure_pdos &&
+       ecrt_slave_config_pdos(sc, EC_END, G_lts_syncs) != 0)
    {
       fprintf(stderr, "Failed to configure LTS PDOs.\n");
       goto out;
@@ -447,6 +458,16 @@ int main(int argc, char **argv)
       fprintf(stderr, "Failed to register PDO entries.\n");
       goto out;
    }
+
+   printf("  PDO offsets: cw=%u tp=%u tv=%u mode=%u sw=%u pos=%u vel=%u md=%u\n",
+          off.controlword,
+          off.target_position,
+          off.target_velocity,
+          off.mode_of_operation,
+          off.statusword,
+          off.actual_position,
+          off.actual_velocity,
+          off.mode_display);
 
    if (ecrt_master_activate(master) != 0)
    {
@@ -460,6 +481,13 @@ int main(int argc, char **argv)
       fprintf(stderr, "Failed to get domain process data pointer.\n");
       goto out;
    }
+
+   EC_WRITE_U16(domain_pd + off.controlword, options.controlword);
+   EC_WRITE_S32(domain_pd + off.target_position, options.target_position);
+   EC_WRITE_S32(domain_pd + off.target_velocity, options.target_velocity);
+   EC_WRITE_S8(domain_pd + off.mode_of_operation, options.mode);
+   ecrt_domain_queue(domain);
+   ecrt_master_send(master);
 
    (void)setup_realtime(options.priority);
 

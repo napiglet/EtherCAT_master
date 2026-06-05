@@ -64,6 +64,17 @@ sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
   --print-every 1000
 ```
 
+If the slave is online and OP but the domain stays at `wkc=0/ZERO`, compare
+with the slave/default SII PDO map:
+
+```bash
+sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
+  --period-us 1000 \
+  --cycles 10000 \
+  --print-every 1000 \
+  --use-sii-pdos
+```
+
 The expected first milestone is stable output like:
 
 ```text
