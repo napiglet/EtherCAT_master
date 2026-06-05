@@ -1,0 +1,76 @@
+{
+  "version": 6,
+  "configurePresets": [{
+    "name": "base",
+    "hidden": true,
+    "binaryDir": "build/${presetName}",
+    "cacheVariables": {
+      "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+      "CMAKE_COMPILE_WARNING_AS_ERROR": true,
+      "CMAKE_FIND_NO_INSTALL_PREFIX": true,
+      "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "$<0:>../../bin"
+    }
+  }, {
+    "name": "ninja-base",
+    "hidden": true,
+    "inherits": "base",
+    "generator": "Ninja"
+  }, {
+    "name": "docs",
+    "inherits": "ninja-base",
+    "cacheVariables": {
+      "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+    }
+  }, {
+    "name": "default",
+    "inherits": "ninja-base"
+  }, {
+    "name": "windows-ninja",
+    "displayName": "Windows Ninja",
+    "inherits": "ninja-base",
+    "cacheVariables": {
+      "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+      "SOEM_BUILD_LMS_MASTER": true,
+      "SOEM_BUILD_ETHERCAT_DLL": true,
+      "SOEM_BUILD_ETHERCAT_GUI": true
+    }
+  }, {
+    "name": "windows-msvc-vs2022",
+    "displayName": "Windows MSVC VS2022 x64",
+    "inherits": "base",
+    "generator": "Visual Studio 17 2022",
+    "architecture": {
+      "value": "x64",
+      "strategy": "set"
+    },
+    "cacheVariables": {
+      "SOEM_BUILD_LMS_MASTER": true,
+      "SOEM_BUILD_ETHERCAT_DLL": true,
+      "SOEM_BUILD_ETHERCAT_GUI": true
+    }
+  }],
+  "buildPresets": [{
+    "name": "default",
+    "configurePreset": "default"
+  }, {
+    "name": "windows-ninja",
+    "configurePreset": "windows-ninja",
+    "targets": ["ethercat_dll", "ethercat_dll_test", "lms_master", "ethercat_gui"]
+  }, {
+    "name": "windows-msvc-vs2022",
+    "configurePreset": "windows-msvc-vs2022",
+    "configuration": "RelWithDebInfo",
+    "targets": ["ethercat_dll", "ethercat_dll_test", "lms_master", "ethercat_gui"]
+  }, {
+    "name": "docs",
+    "configurePreset": "docs",
+    "targets": ["sphinx-html"]
+  }],
+  "packagePresets": [{
+    "name": "default",
+    "configurePreset": "default",
+    "generators": [
+      "ZIP"
+    ]
+  }]
+}

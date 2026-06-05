@@ -1,0 +1,11 @@
+# Bosch-style LMS stator map sample.
+# Edit slave numbers and PDO offsets after reading each LMS slave driver's ESI/PDO map.
+#
+# Columns:
+# slave,name,start_mm,end_mm,coil_pitch_mm,counts_per_mm,controlword_offset,statusword_offset,mode_offset,mode_display_offset,target_position_offset,actual_position_offset
+#
+# Offsets are byte offsets inside each slave's mapped PDO image. Use -1 until confirmed.
+slave,name,start_mm,end_mm,coil_pitch_mm,counts_per_mm,controlword_offset,statusword_offset,mode_offset,mode_display_offset,target_position_offset,actual_position_offset
+1,STATOR_001,0.0,120.0,30.0,1000.0,-1,-1,-1,-1,-1,-1
+2,STATOR_002,120.0,240.0,30.0,1000.0,-1,-1,-1,-1,-1,-1
+3,STATOR_003,240.0,360.0,30.0,1000.0,-1,-1,-1,-1,-1,-1

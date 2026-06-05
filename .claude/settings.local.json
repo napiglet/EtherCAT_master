@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cmake --version 2>&1)",
+      "PowerShell(cl.exe 2>&1)",
+      "PowerShell(Get-Command cmake -ErrorAction SilentlyContinue; $env:PATH -split \";\" | Where-Object {$_ -match \"cmake|CMake\"})",
+      "PowerShell(gcc --version)"
+    ]
+  }
+}
