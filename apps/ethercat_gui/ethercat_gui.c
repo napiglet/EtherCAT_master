@@ -53,6 +53,21 @@ typedef struct GuiState
    HWND sdo_size;
    HWND sdo_read;
    HWND sdo_result;
+   HWND motion_slave;
+   HWND motion_target;
+   HWND motion_velocity;
+   HWND motion_accel;
+   HWND motion_decel;
+   HWND motion_home_method;
+   HWND motion_fault_reset;
+   HWND motion_enable;
+   HWND motion_disable;
+   HWND motion_stop;
+   HWND motion_jog_pos;
+   HWND motion_jog_neg;
+   HWND motion_move_abs;
+   HWND motion_home;
+   HWND motion_status;
    HWND stats_edit;
    HWND xml_import;
    HWND xml_reload;
@@ -60,6 +75,7 @@ typedef struct GuiState
    HWND xml_detail;
    HWND log_edit;
    HWND sdo_labels[4];
+   HWND motion_labels[6];
    HWND rt_labels[2];
    int active_tab;
    int selected_slave;
@@ -244,6 +260,7 @@ static void add_tab(HWND tabs, const char *title, int index)
 static void show_tab_controls(int tab)
 {
    int show_sdo = (tab == 2) ? SW_SHOW : SW_HIDE;
+   int show_motion = (tab == 3) ? SW_SHOW : SW_HIDE;
    int i;
 
    ShowWindow(G_gui.status_list, tab == 0 ? SW_SHOW : SW_HIDE);
@@ -260,12 +277,32 @@ static void show_tab_controls(int tab)
    ShowWindow(G_gui.sdo_read, show_sdo);
    ShowWindow(G_gui.sdo_result, show_sdo);
 
-   ShowWindow(G_gui.stats_edit, tab == 3 ? SW_SHOW : SW_HIDE);
-   ShowWindow(G_gui.xml_import, tab == 4 ? SW_SHOW : SW_HIDE);
-   ShowWindow(G_gui.xml_reload, tab == 4 ? SW_SHOW : SW_HIDE);
-   ShowWindow(G_gui.xml_list, tab == 4 ? SW_SHOW : SW_HIDE);
-   ShowWindow(G_gui.xml_detail, tab == 4 ? SW_SHOW : SW_HIDE);
-   ShowWindow(G_gui.log_edit, tab == 5 ? SW_SHOW : SW_HIDE);
+   for (i = 0; i < 6; ++i)
+   {
+      ShowWindow(G_gui.motion_labels[i], show_motion);
+   }
+   ShowWindow(G_gui.motion_slave, show_motion);
+   ShowWindow(G_gui.motion_target, show_motion);
+   ShowWindow(G_gui.motion_velocity, show_motion);
+   ShowWindow(G_gui.motion_accel, show_motion);
+   ShowWindow(G_gui.motion_decel, show_motion);
+   ShowWindow(G_gui.motion_home_method, show_motion);
+   ShowWindow(G_gui.motion_fault_reset, show_motion);
+   ShowWindow(G_gui.motion_enable, show_motion);
+   ShowWindow(G_gui.motion_disable, show_motion);
+   ShowWindow(G_gui.motion_stop, show_motion);
+   ShowWindow(G_gui.motion_jog_pos, show_motion);
+   ShowWindow(G_gui.motion_jog_neg, show_motion);
+   ShowWindow(G_gui.motion_move_abs, show_motion);
+   ShowWindow(G_gui.motion_home, show_motion);
+   ShowWindow(G_gui.motion_status, show_motion);
+
+   ShowWindow(G_gui.stats_edit, tab == 4 ? SW_SHOW : SW_HIDE);
+   ShowWindow(G_gui.xml_import, tab == 5 ? SW_SHOW : SW_HIDE);
+   ShowWindow(G_gui.xml_reload, tab == 5 ? SW_SHOW : SW_HIDE);
+   ShowWindow(G_gui.xml_list, tab == 5 ? SW_SHOW : SW_HIDE);
+   ShowWindow(G_gui.xml_detail, tab == 5 ? SW_SHOW : SW_HIDE);
+   ShowWindow(G_gui.log_edit, tab == 6 ? SW_SHOW : SW_HIDE);
 }
 
 static void bind_controls(HWND hwnd)
@@ -291,6 +328,21 @@ static void bind_controls(HWND hwnd)
    G_gui.sdo_size = GetDlgItem(hwnd, IDC_SDO_SIZE);
    G_gui.sdo_read = GetDlgItem(hwnd, IDC_SDO_READ);
    G_gui.sdo_result = GetDlgItem(hwnd, IDC_SDO_RESULT);
+   G_gui.motion_slave = GetDlgItem(hwnd, IDC_MOTION_SLAVE);
+   G_gui.motion_target = GetDlgItem(hwnd, IDC_MOTION_TARGET);
+   G_gui.motion_velocity = GetDlgItem(hwnd, IDC_MOTION_VELOCITY);
+   G_gui.motion_accel = GetDlgItem(hwnd, IDC_MOTION_ACCEL);
+   G_gui.motion_decel = GetDlgItem(hwnd, IDC_MOTION_DECEL);
+   G_gui.motion_home_method = GetDlgItem(hwnd, IDC_MOTION_HOME_METHOD);
+   G_gui.motion_fault_reset = GetDlgItem(hwnd, IDC_MOTION_FAULT_RESET);
+   G_gui.motion_enable = GetDlgItem(hwnd, IDC_MOTION_ENABLE);
+   G_gui.motion_disable = GetDlgItem(hwnd, IDC_MOTION_DISABLE);
+   G_gui.motion_stop = GetDlgItem(hwnd, IDC_MOTION_STOP);
+   G_gui.motion_jog_pos = GetDlgItem(hwnd, IDC_MOTION_JOG_POS);
+   G_gui.motion_jog_neg = GetDlgItem(hwnd, IDC_MOTION_JOG_NEG);
+   G_gui.motion_move_abs = GetDlgItem(hwnd, IDC_MOTION_MOVE_ABS);
+   G_gui.motion_home = GetDlgItem(hwnd, IDC_MOTION_HOME);
+   G_gui.motion_status = GetDlgItem(hwnd, IDC_MOTION_STATUS);
    G_gui.stats_edit = GetDlgItem(hwnd, IDC_STATS_EDIT);
    G_gui.xml_import = GetDlgItem(hwnd, IDC_XML_IMPORT);
    G_gui.xml_reload = GetDlgItem(hwnd, IDC_XML_RELOAD);
@@ -301,6 +353,12 @@ static void bind_controls(HWND hwnd)
    G_gui.sdo_labels[1] = GetDlgItem(hwnd, IDC_SDO_INDEX_LABEL);
    G_gui.sdo_labels[2] = GetDlgItem(hwnd, IDC_SDO_SUB_LABEL);
    G_gui.sdo_labels[3] = GetDlgItem(hwnd, IDC_SDO_SIZE_LABEL);
+   G_gui.motion_labels[0] = GetDlgItem(hwnd, IDC_MOTION_SLAVE_LABEL);
+   G_gui.motion_labels[1] = GetDlgItem(hwnd, IDC_MOTION_TARGET_LABEL);
+   G_gui.motion_labels[2] = GetDlgItem(hwnd, IDC_MOTION_VELOCITY_LABEL);
+   G_gui.motion_labels[3] = GetDlgItem(hwnd, IDC_MOTION_ACCEL_LABEL);
+   G_gui.motion_labels[4] = GetDlgItem(hwnd, IDC_MOTION_DECEL_LABEL);
+   G_gui.motion_labels[5] = GetDlgItem(hwnd, IDC_MOTION_HOME_METHOD_LABEL);
    G_gui.rt_labels[0] = GetDlgItem(hwnd, IDC_RT_HOST_LABEL);
    G_gui.rt_labels[1] = GetDlgItem(hwnd, IDC_RT_PORT_LABEL);
 
@@ -313,6 +371,12 @@ static void bind_controls(HWND hwnd)
    SendMessageA(G_gui.sdo_index, EM_SETLIMITTEXT, 12, 0);
    SendMessageA(G_gui.sdo_sub, EM_SETLIMITTEXT, 8, 0);
    SendMessageA(G_gui.sdo_size, EM_SETLIMITTEXT, 4, 0);
+   SendMessageA(G_gui.motion_slave, EM_SETLIMITTEXT, 4, 0);
+   SendMessageA(G_gui.motion_target, EM_SETLIMITTEXT, 12, 0);
+   SendMessageA(G_gui.motion_velocity, EM_SETLIMITTEXT, 12, 0);
+   SendMessageA(G_gui.motion_accel, EM_SETLIMITTEXT, 10, 0);
+   SendMessageA(G_gui.motion_decel, EM_SETLIMITTEXT, 10, 0);
+   SendMessageA(G_gui.motion_home_method, EM_SETLIMITTEXT, 6, 0);
    SetWindowTextA(G_gui.period, "1000");
    SetWindowTextA(G_gui.rt_host, "127.0.0.1");
    SetWindowTextA(G_gui.rt_port, "15000");
@@ -320,13 +384,20 @@ static void bind_controls(HWND hwnd)
    SetWindowTextA(G_gui.sdo_index, "0x6041");
    SetWindowTextA(G_gui.sdo_sub, "0");
    SetWindowTextA(G_gui.sdo_size, "64");
+   SetWindowTextA(G_gui.motion_slave, "1");
+   SetWindowTextA(G_gui.motion_target, "100");
+   SetWindowTextA(G_gui.motion_velocity, "10");
+   SetWindowTextA(G_gui.motion_accel, "0");
+   SetWindowTextA(G_gui.motion_decel, "0");
+   SetWindowTextA(G_gui.motion_home_method, "35");
 
    add_tab(G_gui.tabs, "Slave Status", 0);
    add_tab(G_gui.tabs, "PDO Monitor", 1);
    add_tab(G_gui.tabs, "SDO Browser", 2);
-   add_tab(G_gui.tabs, "Communication", 3);
-   add_tab(G_gui.tabs, "XML Database", 4);
-   add_tab(G_gui.tabs, "Log", 5);
+   add_tab(G_gui.tabs, "Motion Control", 3);
+   add_tab(G_gui.tabs, "Communication", 4);
+   add_tab(G_gui.tabs, "XML Database", 5);
+   add_tab(G_gui.tabs, "Log", 6);
    init_list_columns();
    G_gui.active_tab = 0;
    G_gui.selected_slave = 1;
@@ -397,6 +468,29 @@ static void layout_controls(HWND hwnd)
    MoveWindow(G_gui.sdo_read, tab_rc.left + 452, tab_y, 90, 24, TRUE);
    MoveWindow(G_gui.sdo_result, tab_rc.left, tab_y + 34,
               tab_rc.right - tab_rc.left, tab_rc.bottom - tab_y - 34, TRUE);
+
+   MoveWindow(G_gui.motion_labels[0], tab_rc.left, tab_y + 4, 40, 22, TRUE);
+   MoveWindow(G_gui.motion_slave, tab_rc.left + 44, tab_y, 50, 24, TRUE);
+   MoveWindow(G_gui.motion_labels[1], tab_rc.left + 108, tab_y + 4, 44, 22, TRUE);
+   MoveWindow(G_gui.motion_target, tab_rc.left + 154, tab_y, 82, 24, TRUE);
+   MoveWindow(G_gui.motion_labels[2], tab_rc.left + 248, tab_y + 4, 58, 22, TRUE);
+   MoveWindow(G_gui.motion_velocity, tab_rc.left + 308, tab_y, 82, 24, TRUE);
+   MoveWindow(G_gui.motion_labels[3], tab_rc.left + 404, tab_y + 4, 44, 22, TRUE);
+   MoveWindow(G_gui.motion_accel, tab_rc.left + 450, tab_y, 70, 24, TRUE);
+   MoveWindow(G_gui.motion_labels[4], tab_rc.left + 532, tab_y + 4, 44, 22, TRUE);
+   MoveWindow(G_gui.motion_decel, tab_rc.left + 578, tab_y, 70, 24, TRUE);
+   MoveWindow(G_gui.motion_labels[5], tab_rc.left + 660, tab_y + 4, 44, 22, TRUE);
+   MoveWindow(G_gui.motion_home_method, tab_rc.left + 706, tab_y, 50, 24, TRUE);
+   MoveWindow(G_gui.motion_fault_reset, tab_rc.left, tab_y + 34, 96, 26, TRUE);
+   MoveWindow(G_gui.motion_enable, tab_rc.left + 104, tab_y + 34, 76, 26, TRUE);
+   MoveWindow(G_gui.motion_disable, tab_rc.left + 188, tab_y + 34, 76, 26, TRUE);
+   MoveWindow(G_gui.motion_stop, tab_rc.left + 272, tab_y + 34, 76, 26, TRUE);
+   MoveWindow(G_gui.motion_jog_pos, tab_rc.left + 356, tab_y + 34, 72, 26, TRUE);
+   MoveWindow(G_gui.motion_jog_neg, tab_rc.left + 436, tab_y + 34, 72, 26, TRUE);
+   MoveWindow(G_gui.motion_move_abs, tab_rc.left + 516, tab_y + 34, 82, 26, TRUE);
+   MoveWindow(G_gui.motion_home, tab_rc.left + 606, tab_y + 34, 72, 26, TRUE);
+   MoveWindow(G_gui.motion_status, tab_rc.left, tab_y + 72,
+              tab_rc.right - tab_rc.left, tab_rc.bottom - tab_y - 72, TRUE);
 
    MoveWindow(G_gui.stats_edit, tab_rc.left, tab_rc.top,
               tab_rc.right - tab_rc.left, tab_rc.bottom - tab_rc.top, TRUE);
@@ -795,6 +889,185 @@ static void format_stats_text(char *dst, size_t dst_size,
       r->crc_status);
 }
 
+static int get_edit_i32(HWND edit, int fallback)
+{
+   char text[64];
+   char *end = NULL;
+   long value;
+
+   GetWindowTextA(edit, text, sizeof(text));
+   value = strtol(text, &end, 0);
+   if (end == text)
+   {
+      return fallback;
+   }
+   return (int)value;
+}
+
+static unsigned int get_edit_u32(HWND edit, unsigned int fallback)
+{
+   int value = get_edit_i32(edit, (int)fallback);
+   return value > 0 ? (unsigned int)value : fallback;
+}
+
+static int get_motion_slave(void)
+{
+   int slave = get_edit_i32(G_gui.motion_slave, G_gui.selected_slave);
+
+   if (slave <= 0)
+   {
+      slave = G_gui.selected_slave > 0 ? G_gui.selected_slave : 1;
+      SetDlgItemInt(G_gui.hwnd, IDC_MOTION_SLAVE, (UINT)slave, FALSE);
+   }
+   return slave;
+}
+
+static void format_motion_status(char *dst, size_t dst_size)
+{
+   ECAT_ServoStatus status;
+   int slave = get_motion_slave();
+   int result;
+
+   if (!ECAT_IsOpen())
+   {
+      safe_copy(dst, dst_size, "Motion backend is disconnected.\r\n");
+      return;
+   }
+
+   memset(&status, 0, sizeof(status));
+   result = ECAT_ServoGetStatus(slave, &status);
+   if (result != ECAT_OK)
+   {
+      (void)snprintf(dst, dst_size,
+                     "Servo status read failed.\r\n"
+                     "Slave: %d\r\n"
+                     "Result: %s (%d)\r\n",
+                     slave, ECAT_ErrorToString(result), result);
+      return;
+   }
+
+   (void)snprintf(dst, dst_size,
+                  "Selected slave\r\n"
+                  "  Slave              : %d\r\n\r\n"
+                  "CiA402 Status\r\n"
+                  "  State              : %s\r\n"
+                  "  Statusword         : 0x%04X\r\n"
+                  "  Controlword        : 0x%04X\r\n"
+                  "  Mode display       : %d\r\n"
+                  "  Actual position    : %d\r\n"
+                  "  Actual velocity    : %d\r\n"
+                  "  Error code         : 0x%04X\r\n"
+                  "  Target reached     : %s\r\n"
+                  "  Fault              : %s\r\n"
+                  "  Warning            : %s\r\n\r\n"
+                  "Command fields\r\n"
+                  "  Target position    : %d\r\n"
+                  "  Velocity/Jog       : %d\r\n"
+                  "  Acceleration       : %u\r\n"
+                  "  Deceleration       : %u\r\n"
+                  "  Homing method      : %d\r\n",
+                  slave,
+                  status.cia402_state,
+                  status.statusword,
+                  status.controlword,
+                  status.mode_display,
+                  status.actual_position,
+                  status.actual_velocity,
+                  status.error_code,
+                  status.target_reached ? "Yes" : "No",
+                  status.fault ? "Yes" : "No",
+                  status.warning ? "Yes" : "No",
+                  get_edit_i32(G_gui.motion_target, 0),
+                  get_edit_i32(G_gui.motion_velocity, 0),
+                  get_edit_u32(G_gui.motion_accel, 0),
+                  get_edit_u32(G_gui.motion_decel, 0),
+                  get_edit_i32(G_gui.motion_home_method, 35));
+}
+
+static void finish_motion_command(const char *name, int result)
+{
+   char message[512];
+
+   (void)snprintf(message, sizeof(message), "%s: %s (%d)",
+                  name,
+                  result == ECAT_OK ? "OK" : ECAT_ErrorToString(result),
+                  result);
+   append_log_line(result == ECAT_OK ? "INFO" : "WARN", message);
+   if (result != ECAT_OK)
+   {
+      MessageBoxA(G_gui.hwnd, message, APP_TITLE, MB_ICONWARNING | MB_OK);
+   }
+}
+
+static void request_motion_command(int control_id)
+{
+   int slave = get_motion_slave();
+   int target = get_edit_i32(G_gui.motion_target, 0);
+   int velocity = get_edit_i32(G_gui.motion_velocity, 0);
+   unsigned int accel = get_edit_u32(G_gui.motion_accel, 0);
+   unsigned int decel = get_edit_u32(G_gui.motion_decel, 0);
+   int home_method = get_edit_i32(G_gui.motion_home_method, 35);
+   int result = ECAT_ERROR;
+   const char *name = "Motion command";
+
+   if (!ECAT_IsOpen())
+   {
+      MessageBoxA(G_gui.hwnd, "Connect the EtherCAT backend first.",
+                  APP_TITLE, MB_ICONWARNING | MB_OK);
+      return;
+   }
+
+   switch (control_id)
+   {
+   case IDC_MOTION_FAULT_RESET:
+      name = "Servo Fault Reset";
+      result = ECAT_ServoFaultReset(slave);
+      break;
+   case IDC_MOTION_ENABLE:
+      name = "Servo Enable";
+      result = ECAT_ServoEnable(slave);
+      break;
+   case IDC_MOTION_DISABLE:
+      name = "Servo Disable";
+      result = ECAT_ServoDisable(slave);
+      break;
+   case IDC_MOTION_STOP:
+      name = "Servo Stop";
+      result = ECAT_ServoStop(slave);
+      break;
+   case IDC_MOTION_JOG_POS:
+      name = "Jog +";
+      if (velocity < 0)
+      {
+         velocity = -velocity;
+      }
+      result = ECAT_ServoJog(slave, velocity, accel, decel);
+      break;
+   case IDC_MOTION_JOG_NEG:
+      name = "Jog -";
+      if (velocity > 0)
+      {
+         velocity = -velocity;
+      }
+      result = ECAT_ServoJog(slave, velocity, accel, decel);
+      break;
+   case IDC_MOTION_MOVE_ABS:
+      name = "Move Abs";
+      result = ECAT_ServoMoveAbs(slave, target, (unsigned int)abs(velocity),
+                                 accel, decel);
+      break;
+   case IDC_MOTION_HOME:
+      name = "Home";
+      result = ECAT_ServoHome(slave, (signed char)home_method,
+                              (unsigned int)abs(velocity), 0, accel);
+      break;
+   default:
+      break;
+   }
+
+   finish_motion_command(name, result);
+}
+
 static void update_gui(void)
 {
    ECAT_RuntimeStatus runtime;
@@ -822,6 +1095,12 @@ static void update_gui(void)
    format_stats_text(text, sizeof(text), &runtime);
    SetWindowTextA(G_gui.stats_edit, text);
 
+   if (G_gui.active_tab == 3)
+   {
+      format_motion_status(text, sizeof(text));
+      SetWindowTextA(G_gui.motion_status, text);
+   }
+
    EnterCriticalSection(&G_gui.log_lock);
    safe_copy(logs, sizeof(logs), G_gui.log_text);
    LeaveCriticalSection(&G_gui.log_lock);
@@ -832,6 +1111,14 @@ static void update_gui(void)
    EnableWindow(G_gui.connect, !ECAT_IsOpen());
    EnableWindow(G_gui.disconnect, ECAT_IsOpen());
    EnableWindow(G_gui.sdo_read, ECAT_IsOpen());
+   EnableWindow(G_gui.motion_fault_reset, ECAT_IsOpen());
+   EnableWindow(G_gui.motion_enable, ECAT_IsOpen());
+   EnableWindow(G_gui.motion_disable, ECAT_IsOpen());
+   EnableWindow(G_gui.motion_stop, ECAT_IsOpen());
+   EnableWindow(G_gui.motion_jog_pos, ECAT_IsOpen());
+   EnableWindow(G_gui.motion_jog_neg, ECAT_IsOpen());
+   EnableWindow(G_gui.motion_move_abs, ECAT_IsOpen());
+   EnableWindow(G_gui.motion_home, ECAT_IsOpen());
 }
 
 static void start_master(void)
@@ -940,6 +1227,8 @@ static void on_slave_selection(LPARAM lparam)
       {
          G_gui.selected_slave = 1;
       }
+      SetDlgItemInt(G_gui.hwnd, IDC_MOTION_SLAVE,
+                    (UINT)G_gui.selected_slave, FALSE);
    }
 }
 
@@ -1003,6 +1292,16 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg, WPARAM wparam,
          return TRUE;
       case IDC_SDO_READ:
          request_sdo_read();
+         return TRUE;
+      case IDC_MOTION_FAULT_RESET:
+      case IDC_MOTION_ENABLE:
+      case IDC_MOTION_DISABLE:
+      case IDC_MOTION_STOP:
+      case IDC_MOTION_JOG_POS:
+      case IDC_MOTION_JOG_NEG:
+      case IDC_MOTION_MOVE_ABS:
+      case IDC_MOTION_HOME:
+         request_motion_command(LOWORD(wparam));
          return TRUE;
       case IDC_XML_IMPORT:
          import_xml_file();
