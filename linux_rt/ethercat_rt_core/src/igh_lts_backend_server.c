@@ -24,6 +24,7 @@
 #define DEFAULT_PERIOD_US 1000
 #define DEFAULT_PRIORITY 80
 #define DEFAULT_SEQUENCE_TIMEOUT_MS 5000
+#define DEFAULT_CLIENT_TIMEOUT_MS 1000
 #define LTS_PDO_BYTES 14
 
 typedef int socket_t;
@@ -55,6 +56,7 @@ typedef struct BackendOptions
    int priority;
    int configure_pdos;
    int sequence_timeout_ms;
+   int client_timeout_ms;
 } BackendOptions;
 
 typedef struct BackendCommand
@@ -78,6 +80,9 @@ typedef struct BackendRuntime
    int stop_requested;
    int initialized;
    int fatal_error;
+   int safety_stop_active;
+   int safety_stop_count;
+   int64_t last_client_message_ns;
    uint32_t response_sequence;
    BackendCommand command;
    ECAT_NetStatus status;
@@ -227,6 +232,9 @@ static void usage(const char *argv0)
    printf("  --use-sii-pdos       Use slave/default SII PDO map.\n");
    printf("  --sequence-timeout-ms N  CiA402 sequence timeout. Default: %d\n",
           DEFAULT_SEQUENCE_TIMEOUT_MS);
+   printf("  --client-timeout-ms N    Safety stop when no client message arrives. Default: %d\n",
+          DEFAULT_CLIENT_TIMEOUT_MS);
+   printf("                           Use 0 to disable client heartbeat timeout.\n");
    printf("  --help               Show this help.\n");
 }
 
@@ -240,6 +248,7 @@ static void options_init(BackendOptions *options)
    options->priority = DEFAULT_PRIORITY;
    options->configure_pdos = 1;
    options->sequence_timeout_ms = DEFAULT_SEQUENCE_TIMEOUT_MS;
+   options->client_timeout_ms = DEFAULT_CLIENT_TIMEOUT_MS;
 }
 
 static int parse_options(int argc, char **argv, BackendOptions *options)
@@ -327,6 +336,16 @@ static int parse_options(int argc, char **argv, BackendOptions *options)
              options->sequence_timeout_ms <= 0)
          {
             fprintf(stderr, "Invalid --sequence-timeout-ms value.\n");
+            return -1;
+         }
+      }
+      else if (strcmp(argv[i], "--client-timeout-ms") == 0 &&
+               i + 1 < argc)
+      {
+         if (parse_int(argv[++i], &options->client_timeout_ms) != 0 ||
+             options->client_timeout_ms < 0)
+         {
+            fprintf(stderr, "Invalid --client-timeout-ms value.\n");
             return -1;
          }
       }
@@ -478,6 +497,14 @@ static int64_t timespec_to_ns(const struct timespec *time)
    return ((int64_t)time->tv_sec * 1000000000LL) + (int64_t)time->tv_nsec;
 }
 
+static int64_t monotonic_now_ns(void)
+{
+   struct timespec now;
+
+   clock_gettime(CLOCK_MONOTONIC, &now);
+   return timespec_to_ns(&now);
+}
+
 static int64_t ns_to_us(int64_t ns)
 {
    return ns / 1000LL;
@@ -515,6 +542,7 @@ static void runtime_init(BackendRuntime *rt, const BackendOptions *options)
    rt->options = *options;
    pthread_mutex_init(&rt->lock, NULL);
    cia402_motion_init(&rt->command.motion);
+   rt->last_client_message_ns = monotonic_now_ns();
    rt->status.runtime.period_us = options->period_us;
    safe_copy(rt->status.runtime.state_text,
              sizeof(rt->status.runtime.state_text),
@@ -572,6 +600,7 @@ static void runtime_get_status(BackendRuntime *rt, ECAT_NetStatus *status)
 static void runtime_reset_statistics_locked(BackendRuntime *rt)
 {
    rt->command.reset_generation++;
+   rt->safety_stop_count = 0;
 }
 
 static void backend_command_safe_stop(BackendCommand *command)
@@ -580,6 +609,26 @@ static void backend_command_safe_stop(BackendCommand *command)
    command->target_velocity = 0;
    command->sequence = CIA402_SEQ_NONE;
    cia402_motion_init(&command->motion);
+}
+
+static void runtime_mark_client_message(BackendRuntime *rt)
+{
+   pthread_mutex_lock(&rt->lock);
+   rt->last_client_message_ns = monotonic_now_ns();
+   rt->safety_stop_active = 0;
+   pthread_mutex_unlock(&rt->lock);
+}
+
+static void runtime_apply_safety_stop_locked(BackendRuntime *rt,
+                                             const char *reason)
+{
+   backend_command_safe_stop(&rt->command);
+   rt->command.generation++;
+   rt->safety_stop_active = 1;
+   rt->safety_stop_count++;
+   safe_copy(rt->status.runtime.last_error,
+             sizeof(rt->status.runtime.last_error),
+             reason);
 }
 
 static void runtime_apply_command(BackendRuntime *rt,
@@ -889,6 +938,7 @@ static void *rt_thread_main(void *arg)
    uint32_t reset_generation_seen = 0;
    int sequence_done = 1;
    int sequence_failed = 0;
+   int sequence_start_cycle = 0;
    int sequence_done_cycle = -1;
    int result = 1;
 
@@ -1012,6 +1062,7 @@ static void *rt_thread_main(void *arg)
       Cia402PdoOutput pdo_output;
       int64_t avg_loop_us;
       int64_t print_min_loop_us;
+      int safety_stop_active;
 
       clock_gettime(CLOCK_MONOTONIC, &loop_time);
       if (cycle > 0)
@@ -1039,7 +1090,18 @@ static void *rt_thread_main(void *arg)
       previous_loop_time = loop_time;
 
       pthread_mutex_lock(&rt->lock);
+      if (options.client_timeout_ms > 0 &&
+          rt->last_client_message_ns > 0 &&
+          timespec_to_ns(&loop_time) - rt->last_client_message_ns >
+             (int64_t)options.client_timeout_ms * 1000000LL)
+      {
+         if (!rt->safety_stop_active)
+         {
+            runtime_apply_safety_stop_locked(rt, "Client heartbeat timeout. Safe stop applied.");
+         }
+      }
       command = rt->command;
+      safety_stop_active = rt->safety_stop_active;
       if (command.reset_generation != reset_generation_seen)
       {
          reset_generation_seen = command.reset_generation;
@@ -1060,6 +1122,7 @@ static void *rt_thread_main(void *arg)
          command_generation_seen = command.generation;
          sequence_done = command.sequence == CIA402_SEQ_NONE ? 1 : 0;
          sequence_failed = 0;
+         sequence_start_cycle = cycle;
          sequence_done_cycle = -1;
       }
 
@@ -1116,7 +1179,8 @@ static void *rt_thread_main(void *arg)
          sequence_done_cycle = cycle;
       }
       if (!sequence_done && !sequence_failed &&
-          (((int64_t)cycle * options.period_us) / 1000LL) >=
+          (((int64_t)(cycle - sequence_start_cycle) * options.period_us) /
+           1000LL) >=
              options.sequence_timeout_ms)
       {
          sequence_failed = 1;
@@ -1163,8 +1227,15 @@ static void *rt_thread_main(void *arg)
                      cia402_status_text(drive_state),
                      cia402_mode_text(mode_display),
                      cia402_sequence_text(command.sequence),
-                     cia402_motion_text(command.motion.type));
-      if (sequence_failed)
+                     safety_stop_active ? "SafetyStop" :
+                        cia402_motion_text(command.motion.type));
+      if (safety_stop_active)
+      {
+         safe_copy(rt->status.runtime.last_error,
+                   sizeof(rt->status.runtime.last_error),
+                   "Client heartbeat timeout. Safe stop applied.");
+      }
+      else if (sequence_failed)
       {
          safe_copy(rt->status.runtime.last_error,
                    sizeof(rt->status.runtime.last_error),
@@ -1178,12 +1249,13 @@ static void *rt_thread_main(void *arg)
       }
       (void)snprintf(rt->status.runtime.crc_status,
                      sizeof(rt->status.runtime.crc_status),
-                     "WKC %u/%s, wkc_errors=%d, state_errors=%d, jitter_max=%lldus",
+                     "WKC %u/%s, wkc_errors=%d, state_errors=%d, jitter_max=%lldus, safety_stops=%d",
                      domain_state.working_counter,
                      wc_state_text(domain_state.wc_state),
                      wkc_errors,
                      state_errors,
-                     (long long)max_period_error_us);
+                     (long long)max_period_error_us,
+                     rt->safety_stop_count);
 
       {
          ECAT_NetSlaveStatus *slave = &rt->status.slaves[0];
@@ -1352,6 +1424,7 @@ static int handle_client(socket_t client, const BackendOptions *base_options)
       {
          break;
       }
+      runtime_mark_client_message(&rt);
 
       if (header.type == ECAT_NET_MSG_COMMAND)
       {

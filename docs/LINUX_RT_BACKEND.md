@@ -294,7 +294,8 @@ Run:
 ```bash
 sudo ./build/linux-xenomai/bin/ethercat_igh_backend_server \
   --port 15000 \
-  --period-us 1000
+  --period-us 1000 \
+  --client-timeout-ms 1000
 ```
 
 If the LTS drive needs the SII/default PDO map:
@@ -303,7 +304,8 @@ If the LTS drive needs the SII/default PDO map:
 sudo ./build/linux-xenomai/bin/ethercat_igh_backend_server \
   --port 15000 \
   --period-us 1000 \
-  --use-sii-pdos
+  --use-sii-pdos \
+  --client-timeout-ms 1000
 ```
 
 Windows side:
@@ -316,12 +318,13 @@ Windows side:
 The first server supports runtime status, WKC/cycle diagnostics, PDO snapshots,
 cached SDO reads/writes for the mapped CiA402 objects, Servo Enable/Disable,
 Fault Reset, Jog, Profile Position, Home, Stop, and LMS wrapper commands.
+It also applies a safe stop when the Windows client heartbeat is absent longer
+than `--client-timeout-ms`. GUI status polling sends `ECAT_NET_CMD_NONE`, which
+serves as the heartbeat.
 
 ## Next Implementation Step
 
 1. Test `ethercat_igh_backend_server` with the Windows GUI over the network.
-2. Add a heartbeat/timeout safety layer so command outputs decay to stop when
-   the Windows client disappears.
-3. Move the LTS-specific PDO profile into the XML database/profile loader.
-4. Add multi-slave support and per-slave CiA402 state machines.
-5. Start LMS-specific mover/stator abstractions above the generic motion layer.
+2. Move the LTS-specific PDO profile into the XML database/profile loader.
+3. Add multi-slave support and per-slave CiA402 state machines.
+4. Start LMS-specific mover/stator abstractions above the generic motion layer.

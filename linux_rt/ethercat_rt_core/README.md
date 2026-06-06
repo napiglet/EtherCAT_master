@@ -148,7 +148,8 @@ Run on the Linux RT controller:
 ```bash
 sudo ./build/linux-xenomai/bin/ethercat_igh_backend_server \
   --port 15000 \
-  --period-us 1000
+  --period-us 1000 \
+  --client-timeout-ms 1000
 ```
 
 If the PDO map must use the slave's default SII map:
@@ -157,10 +158,15 @@ If the PDO map must use the slave's default SII map:
 sudo ./build/linux-xenomai/bin/ethercat_igh_backend_server \
   --port 15000 \
   --period-us 1000 \
-  --use-sii-pdos
+  --use-sii-pdos \
+  --client-timeout-ms 1000
 ```
 
 Then on Windows select the GUI backend as `Linux RT`, set the Linux controller
 IP address and port `15000`, and open the connection. The GUI/DLL can now read
 runtime status, WKC/cycle statistics, PDO snapshots, cached SDO values, and send
 CiA402 commands through the same API used by the mock backend.
+
+The backend applies a safe stop when no Windows client message arrives before
+`--client-timeout-ms`. Normal GUI status polling sends `ECAT_NET_CMD_NONE`, so
+it also acts as the heartbeat.
