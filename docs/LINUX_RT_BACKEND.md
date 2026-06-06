@@ -18,6 +18,7 @@ Linux RT Controller
   TCP server
   mock status for Windows integration tests
   IgH/Xenomai cyclic PDO monitor for real slave bring-up
+  IgH/Xenomai TCP backend server for Windows GUI/DLL integration
 ```
 
 ## Current Status
@@ -26,6 +27,9 @@ Linux RT Controller
 - `linux_rt/ethercat_rt_core` builds a mock RT server.
 - `ethercat_igh_lts_monitor` is a Linux-only IgH/Xenomai cyclic PDO monitor
   for the detected `LTS_MotorDriver1x` slave.
+- `ethercat_igh_backend_server` is a Linux-only IgH/Xenomai TCP backend server
+  that runs the real cyclic PDO loop and talks to the Windows GUI/DLL over the
+  existing protocol.
 - `ethercat_dll` can select either backend:
   - `ECAT_BACKEND_WINDOWS_DEBUG`
   - `ECAT_BACKEND_LINUX_RT`
@@ -117,6 +121,7 @@ cmake -S . -B build/linux-xenomai \
   -DECAT_XENOMAI_CONFIG=/usr/xenomai/bin/xeno-config
 
 cmake --build build/linux-xenomai --target ethercat_igh_lts_monitor -j$(nproc)
+cmake --build build/linux-xenomai --target ethercat_igh_backend_server -j$(nproc)
 ```
 
 Safe PDO exchange test. This does not enable the servo; the command outputs are
@@ -266,13 +271,57 @@ out{tp=... tv=... mode=... motion=JogVelocity}
 err{wkc=0 state=0}
 ```
 
+## IgH/Xenomai TCP Backend Server
+
+The first real Windows GUI/DLL integration target is:
+
+```text
+ethercat_igh_backend_server
+```
+
+It keeps the IgH cyclic PDO loop running in a realtime thread and serves the
+existing Windows protocol on TCP port `15000`. The first backend target is still
+LTS-specific, using the PDO map already confirmed on the mini PC.
+
+Build:
+
+```bash
+cmake --build build/linux-xenomai --target ethercat_igh_backend_server -j$(nproc)
+```
+
+Run:
+
+```bash
+sudo ./build/linux-xenomai/bin/ethercat_igh_backend_server \
+  --port 15000 \
+  --period-us 1000
+```
+
+If the LTS drive needs the SII/default PDO map:
+
+```bash
+sudo ./build/linux-xenomai/bin/ethercat_igh_backend_server \
+  --port 15000 \
+  --period-us 1000 \
+  --use-sii-pdos
+```
+
+Windows side:
+
+1. Select GUI backend `Linux RT`.
+2. Set host to the Linux controller IP address.
+3. Set port to `15000`.
+4. Open the connection.
+
+The first server supports runtime status, WKC/cycle diagnostics, PDO snapshots,
+cached SDO reads/writes for the mapped CiA402 objects, Servo Enable/Disable,
+Fault Reset, Jog, Profile Position, Home, Stop, and LMS wrapper commands.
+
 ## Next Implementation Step
 
-After the PDO monitor is stable:
-
-1. Move the IgH loop into the TCP backend runtime.
-2. Add a command/status double buffer between TCP and the RT loop.
-3. Reuse `motion_cia402` inside the backend runtime.
-4. Add backend command handling for jog, profile-position, homing, stop, and
-   safety limits.
-5. Route Windows GUI/DLL commands to the Linux RT backend.
+1. Test `ethercat_igh_backend_server` with the Windows GUI over the network.
+2. Add a heartbeat/timeout safety layer so command outputs decay to stop when
+   the Windows client disappears.
+3. Move the LTS-specific PDO profile into the XML database/profile loader.
+4. Add multi-slave support and per-slave CiA402 state machines.
+5. Start LMS-specific mover/stator abstractions above the generic motion layer.

@@ -9,11 +9,13 @@ Current phase:
 - Mock single CiA402 slave.
 - Accepts motion commands from the Windows DLL.
 - IgH/Xenomai LTS_MotorDriver1x PDO monitor target.
+- IgH/Xenomai TCP backend server target for Windows GUI/DLL integration.
 
 Future phase:
 
 1. Keep Windows GUI/DLL protocol stable.
-2. Replace the mock cycle with the IgH cyclic PDO backend.
+2. Move the first LTS-specific IgH backend to a generic XML/profile-driven
+   backend.
 3. Keep the TCP protocol stable so the Windows GUI and DLL do not change.
 
 Run on Linux:
@@ -55,6 +57,7 @@ cmake -S . -B build/linux-xenomai \
   -DECAT_XENOMAI_CONFIG=/usr/xenomai/bin/xeno-config
 
 cmake --build build/linux-xenomai --target ethercat_igh_lts_monitor -j$(nproc)
+cmake --build build/linux-xenomai --target ethercat_igh_backend_server -j$(nproc)
 ```
 
 Safe first run. This exchanges PDOs but leaves the drive command outputs at
@@ -133,3 +136,31 @@ sudo ./build/linux-xenomai/bin/ethercat_igh_lts_monitor \
   --profile-position 100 \
   --profile-velocity 10
 ```
+
+## IgH/Xenomai TCP backend server
+
+This is the first real Windows GUI/DLL integration target. It runs the IgH
+cyclic PDO loop continuously and exposes the existing `common/ecat_protocol.h`
+TCP protocol on port `15000`.
+
+Run on the Linux RT controller:
+
+```bash
+sudo ./build/linux-xenomai/bin/ethercat_igh_backend_server \
+  --port 15000 \
+  --period-us 1000
+```
+
+If the PDO map must use the slave's default SII map:
+
+```bash
+sudo ./build/linux-xenomai/bin/ethercat_igh_backend_server \
+  --port 15000 \
+  --period-us 1000 \
+  --use-sii-pdos
+```
+
+Then on Windows select the GUI backend as `Linux RT`, set the Linux controller
+IP address and port `15000`, and open the connection. The GUI/DLL can now read
+runtime status, WKC/cycle statistics, PDO snapshots, cached SDO values, and send
+CiA402 commands through the same API used by the mock backend.

@@ -41,16 +41,28 @@ if(UNIX AND NOT APPLE AND ECAT_RT_CORE_ENABLE_IGH)
     include/motion_cia402.h
   )
 
-  target_include_directories(ethercat_igh_lts_monitor PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/include"
-    "${ECAT_IGH_INCLUDE_DIR}"
+  add_executable(ethercat_igh_backend_server
+    src/igh_lts_backend_server.c
+    src/motion_cia402.c
+    include/motion_cia402.h
+    "${CMAKE_SOURCE_DIR}/common/ecat_protocol.h"
   )
 
-  target_link_libraries(ethercat_igh_lts_monitor PRIVATE
-    "${ECAT_IGH_LIBRARY}"
-    pthread
-    rt
-  )
+  foreach(ECAT_IGH_TARGET
+      ethercat_igh_lts_monitor
+      ethercat_igh_backend_server)
+    target_include_directories(${ECAT_IGH_TARGET} PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/include"
+      "${CMAKE_SOURCE_DIR}/common"
+      "${ECAT_IGH_INCLUDE_DIR}"
+    )
+
+    target_link_libraries(${ECAT_IGH_TARGET} PRIVATE
+      "${ECAT_IGH_LIBRARY}"
+      pthread
+      rt
+    )
+  endforeach()
 
   if(EXISTS "${ECAT_XENOMAI_CONFIG}")
     execute_process(
@@ -65,25 +77,33 @@ if(UNIX AND NOT APPLE AND ECAT_RT_CORE_ENABLE_IGH)
     )
     separate_arguments(ECAT_XENOMAI_CFLAGS UNIX_COMMAND "${ECAT_XENOMAI_CFLAGS}")
     separate_arguments(ECAT_XENOMAI_LDFLAGS UNIX_COMMAND "${ECAT_XENOMAI_LDFLAGS}")
-    target_compile_options(ethercat_igh_lts_monitor PRIVATE
-      ${ECAT_XENOMAI_CFLAGS}
-    )
-    target_link_options(ethercat_igh_lts_monitor PRIVATE
-      ${ECAT_XENOMAI_LDFLAGS}
-    )
-    target_compile_definitions(ethercat_igh_lts_monitor PRIVATE
-      ECAT_USE_XENOMAI_POSIX=1
-    )
+    foreach(ECAT_IGH_TARGET
+        ethercat_igh_lts_monitor
+        ethercat_igh_backend_server)
+      target_compile_options(${ECAT_IGH_TARGET} PRIVATE
+        ${ECAT_XENOMAI_CFLAGS}
+      )
+      target_link_options(${ECAT_IGH_TARGET} PRIVATE
+        ${ECAT_XENOMAI_LDFLAGS}
+      )
+      target_compile_definitions(${ECAT_IGH_TARGET} PRIVATE
+        ECAT_USE_XENOMAI_POSIX=1
+      )
+    endforeach()
   else()
     message(WARNING
-      "Xenomai xeno-config not found. Building ethercat_igh_lts_monitor with Linux POSIX timing only.")
+      "Xenomai xeno-config not found. Building IgH tools with Linux POSIX timing only.")
   endif()
 
-  target_compile_options(ethercat_igh_lts_monitor PRIVATE
-    -Wall -Wextra -Wno-unused-parameter
-  )
+  foreach(ECAT_IGH_TARGET
+      ethercat_igh_lts_monitor
+      ethercat_igh_backend_server)
+    target_compile_options(${ECAT_IGH_TARGET} PRIVATE
+      -Wall -Wextra -Wno-unused-parameter
+    )
 
-  set_target_properties(ethercat_igh_lts_monitor PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-  )
+    set_target_properties(${ECAT_IGH_TARGET} PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
+  endforeach()
 endif()
