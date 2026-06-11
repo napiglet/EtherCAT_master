@@ -690,9 +690,26 @@ static void runtime_apply_command(BackendRuntime *rt,
       command->sequence = CIA402_SEQ_ENABLE;
       cia402_motion_init(&command->motion);
       command->motion.type = CIA402_MOTION_PROFILE_POSITION;
-      command->motion.mode = CIA402_MODE_PROFILE_POSITION;
+      command->motion.mode = CIA402_MODE_CSP;
       command->motion.target_position = net_command->target_position;
       command->motion.profile_velocity = (int32_t)net_command->velocity;
+      command->motion.acceleration = net_command->acceleration;
+      command->motion.deceleration = net_command->deceleration;
+      command->motion.relative = 0;
+      command->generation++;
+      break;
+
+   case ECAT_NET_CMD_SERVO_MOVE_REL:
+      command->target_position = net_command->target_position;
+      command->sequence = CIA402_SEQ_ENABLE;
+      cia402_motion_init(&command->motion);
+      command->motion.type = CIA402_MOTION_PROFILE_POSITION;
+      command->motion.mode = CIA402_MODE_CSP;
+      command->motion.target_position = net_command->target_position;
+      command->motion.profile_velocity = (int32_t)net_command->velocity;
+      command->motion.acceleration = net_command->acceleration;
+      command->motion.deceleration = net_command->deceleration;
+      command->motion.relative = 1;
       command->generation++;
       break;
 
@@ -704,6 +721,8 @@ static void runtime_apply_command(BackendRuntime *rt,
       command->motion.type = CIA402_MOTION_JOG_VELOCITY;
       command->motion.mode = CIA402_MODE_CSV;
       command->motion.target_velocity = net_command->target_velocity;
+      command->motion.acceleration = net_command->acceleration;
+      command->motion.deceleration = net_command->deceleration;
       command->generation++;
       break;
 
@@ -713,6 +732,8 @@ static void runtime_apply_command(BackendRuntime *rt,
       command->motion.type = CIA402_MOTION_HOME;
       command->motion.mode = CIA402_MODE_HOMING;
       command->motion.target_velocity = (int32_t)net_command->search_speed;
+      command->motion.acceleration = net_command->acceleration;
+      command->motion.deceleration = net_command->deceleration;
       command->generation++;
       break;
 
@@ -721,6 +742,8 @@ static void runtime_apply_command(BackendRuntime *rt,
       command->sequence = CIA402_SEQ_NONE;
       cia402_motion_init(&command->motion);
       command->motion.type = CIA402_MOTION_SERVO_STOP;
+      command->motion.mode = CIA402_MODE_CSV;
+      command->motion.deceleration = net_command->deceleration;
       command->generation++;
       break;
 
@@ -941,8 +964,10 @@ static void *rt_thread_main(void *arg)
    int sequence_start_cycle = 0;
    int sequence_done_cycle = -1;
    int result = 1;
+   Cia402MotionProfile profile;
 
    safe_copy(slave_name, sizeof(slave_name), "LTS_MotorDriver1x");
+   cia402_profile_reset(&profile);
    memset(&off, 0, sizeof(off));
    memset(bit_positions, 0, sizeof(bit_positions));
    memset(regs, 0, sizeof(regs));
@@ -1063,6 +1088,7 @@ static void *rt_thread_main(void *arg)
       int64_t avg_loop_us;
       int64_t print_min_loop_us;
       int safety_stop_active;
+      int profile_done = profile.done;
 
       clock_gettime(CLOCK_MONOTONIC, &loop_time);
       if (cycle > 0)
@@ -1124,6 +1150,7 @@ static void *rt_thread_main(void *arg)
          sequence_failed = 0;
          sequence_start_cycle = cycle;
          sequence_done_cycle = -1;
+         cia402_profile_reset(&profile);
       }
 
       ecrt_master_receive(master);
@@ -1169,9 +1196,9 @@ static void *rt_thread_main(void *arg)
                                      drive_state,
                                      command.controlword,
                                      &sequence_target_reached);
-      pdo_output.target_position = command.target_position;
+      pdo_output.target_position = actual_position;
       pdo_output.target_velocity = command.target_velocity;
-      pdo_output.mode = command.mode;
+      pdo_output.mode = command.mode != 0 ? command.mode : mode_display;
 
       if (!sequence_done && sequence_target_reached)
       {
@@ -1191,10 +1218,24 @@ static void *rt_thread_main(void *arg)
          cycle_after_sequence = cycle - sequence_done_cycle;
       }
 
-      cia402_motion_apply(&command.motion,
-                          sequence_done && !sequence_failed,
-                          cycle_after_sequence,
-                          &pdo_output);
+      if (command.motion.type != CIA402_MOTION_NONE &&
+          sequence_done && !sequence_failed)
+      {
+         profile_done = cia402_profile_step(&profile,
+                                            &command.motion,
+                                            actual_position,
+                                            actual_velocity,
+                                            options.period_us,
+                                            &pdo_output);
+      }
+      else if (command.motion.type != CIA402_MOTION_NONE)
+      {
+         profile_done = 0;
+      }
+      else
+      {
+         cia402_profile_reset(&profile);
+      }
 
       EC_WRITE_U16(domain_pd + off.controlword, pdo_output.controlword);
       EC_WRITE_S32(domain_pd + off.target_position, pdo_output.target_position);
@@ -1221,14 +1262,18 @@ static void *rt_thread_main(void *arg)
       rt->status.runtime.period_us = options.period_us;
       (void)snprintf(rt->status.runtime.state_text,
                      sizeof(rt->status.runtime.state_text),
-                     "IgH %s, slave %s, CiA402 %s, mode %s, seq %s, motion %s",
+                     "IgH %s, slave %s, CiA402 %s, mode %s, seq %s, motion %s%s",
                      wc_state_text(domain_state.wc_state),
                      sc_state.operational ? "OP" : "not OP",
                      cia402_status_text(drive_state),
                      cia402_mode_text(mode_display),
                      cia402_sequence_text(command.sequence),
                      safety_stop_active ? "SafetyStop" :
-                        cia402_motion_text(command.motion.type));
+                        cia402_motion_text(command.motion.type),
+                     (command.motion.type != CIA402_MOTION_NONE &&
+                      !safety_stop_active)
+                        ? (profile_done ? "/Done" : "/Running")
+                        : "");
       if (safety_stop_active)
       {
          safe_copy(rt->status.runtime.last_error,

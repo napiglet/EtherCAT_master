@@ -4,6 +4,7 @@
 #include <ws2tcpip.h>
 
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2600,6 +2601,49 @@ int ECAT_ServoMoveAbs(int slave_index, int target_position,
    return servo_write_controlword(slave_index, 0x000F);
 }
 
+int ECAT_ServoMoveRel(int slave_index, int distance,
+                      unsigned int velocity,
+                      unsigned int acceleration,
+                      unsigned int deceleration)
+{
+   int current_position;
+   long long target_position;
+   int result;
+
+   ensure_initialized();
+   if (slave_index <= 0)
+   {
+      return ECAT_INVALID_ARGUMENT;
+   }
+   if (is_linux_rt_backend())
+   {
+      return rt_send_motion_command(ECAT_NET_CMD_SERVO_MOVE_REL,
+                                    slave_index, distance, 0, velocity,
+                                    acceleration, deceleration, 0, 0, 0, 0);
+   }
+
+   result = ECAT_ServoGetPosition(slave_index, &current_position);
+   if (result != ECAT_OK)
+   {
+      return result;
+   }
+   target_position = (long long)current_position + (long long)distance;
+   if (target_position < INT_MIN || target_position > INT_MAX)
+   {
+      return ECAT_INVALID_ARGUMENT;
+   }
+   return ECAT_ServoMoveAbs(slave_index, (int)target_position, velocity,
+                            acceleration, deceleration);
+}
+
+int ECAT_ServoMoveVel(int slave_index, int target_velocity,
+                      unsigned int acceleration,
+                      unsigned int deceleration)
+{
+   return ECAT_ServoJog(slave_index, target_velocity, acceleration,
+                        deceleration);
+}
+
 int ECAT_ServoJog(int slave_index, int target_velocity,
                   unsigned int acceleration,
                   unsigned int deceleration)
@@ -2741,6 +2785,16 @@ int ECAT_ServoStop(int slave_index)
    return ECAT_OK;
 }
 
+int ECAT_ServoGetPosition(int slave_index, int *position)
+{
+   ensure_initialized();
+   if (position == NULL || slave_index <= 0)
+   {
+      return ECAT_INVALID_ARGUMENT;
+   }
+   return read_sdo_i32(slave_index, 0x6064, 0, position);
+}
+
 int ECAT_LMS_MoveAbs(int slave_index, int target_position,
                      unsigned int velocity)
 {
@@ -2759,12 +2813,7 @@ int ECAT_LMS_Stop(int slave_index)
 
 int ECAT_LMS_GetMoverPosition(int slave_index, int *position)
 {
-   ensure_initialized();
-   if (position == NULL || slave_index <= 0)
-   {
-      return ECAT_INVALID_ARGUMENT;
-   }
-   return read_sdo_i32(slave_index, 0x6064, 0, position);
+   return ECAT_ServoGetPosition(slave_index, position);
 }
 
 int ECAT_DbSetRoot(const char *root_dir)

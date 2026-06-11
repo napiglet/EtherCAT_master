@@ -66,6 +66,7 @@ typedef struct GuiState
    HWND motion_jog_pos;
    HWND motion_jog_neg;
    HWND motion_move_abs;
+   HWND motion_move_rel;
    HWND motion_home;
    HWND motion_status;
    HWND stats_edit;
@@ -294,6 +295,7 @@ static void show_tab_controls(int tab)
    ShowWindow(G_gui.motion_jog_pos, show_motion);
    ShowWindow(G_gui.motion_jog_neg, show_motion);
    ShowWindow(G_gui.motion_move_abs, show_motion);
+   ShowWindow(G_gui.motion_move_rel, show_motion);
    ShowWindow(G_gui.motion_home, show_motion);
    ShowWindow(G_gui.motion_status, show_motion);
 
@@ -341,6 +343,7 @@ static void bind_controls(HWND hwnd)
    G_gui.motion_jog_pos = GetDlgItem(hwnd, IDC_MOTION_JOG_POS);
    G_gui.motion_jog_neg = GetDlgItem(hwnd, IDC_MOTION_JOG_NEG);
    G_gui.motion_move_abs = GetDlgItem(hwnd, IDC_MOTION_MOVE_ABS);
+   G_gui.motion_move_rel = GetDlgItem(hwnd, IDC_MOTION_MOVE_REL);
    G_gui.motion_home = GetDlgItem(hwnd, IDC_MOTION_HOME);
    G_gui.motion_status = GetDlgItem(hwnd, IDC_MOTION_STATUS);
    G_gui.stats_edit = GetDlgItem(hwnd, IDC_STATS_EDIT);
@@ -488,7 +491,8 @@ static void layout_controls(HWND hwnd)
    MoveWindow(G_gui.motion_jog_pos, tab_rc.left + 356, tab_y + 34, 72, 26, TRUE);
    MoveWindow(G_gui.motion_jog_neg, tab_rc.left + 436, tab_y + 34, 72, 26, TRUE);
    MoveWindow(G_gui.motion_move_abs, tab_rc.left + 516, tab_y + 34, 82, 26, TRUE);
-   MoveWindow(G_gui.motion_home, tab_rc.left + 606, tab_y + 34, 72, 26, TRUE);
+   MoveWindow(G_gui.motion_move_rel, tab_rc.left + 606, tab_y + 34, 82, 26, TRUE);
+   MoveWindow(G_gui.motion_home, tab_rc.left + 696, tab_y + 34, 60, 26, TRUE);
    MoveWindow(G_gui.motion_status, tab_rc.left, tab_y + 72,
               tab_rc.right - tab_rc.left, tab_rc.bottom - tab_y - 72, TRUE);
 
@@ -1056,6 +1060,11 @@ static void request_motion_command(int control_id)
       result = ECAT_ServoMoveAbs(slave, target, (unsigned int)abs(velocity),
                                  accel, decel);
       break;
+   case IDC_MOTION_MOVE_REL:
+      name = "Move Rel";
+      result = ECAT_ServoMoveRel(slave, target, (unsigned int)abs(velocity),
+                                 accel, decel);
+      break;
    case IDC_MOTION_HOME:
       name = "Home";
       result = ECAT_ServoHome(slave, (signed char)home_method,
@@ -1118,6 +1127,7 @@ static void update_gui(void)
    EnableWindow(G_gui.motion_jog_pos, ECAT_IsOpen());
    EnableWindow(G_gui.motion_jog_neg, ECAT_IsOpen());
    EnableWindow(G_gui.motion_move_abs, ECAT_IsOpen());
+   EnableWindow(G_gui.motion_move_rel, ECAT_IsOpen());
    EnableWindow(G_gui.motion_home, ECAT_IsOpen());
 }
 
@@ -1300,6 +1310,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg, WPARAM wparam,
       case IDC_MOTION_JOG_POS:
       case IDC_MOTION_JOG_NEG:
       case IDC_MOTION_MOVE_ABS:
+      case IDC_MOTION_MOVE_REL:
       case IDC_MOTION_HOME:
          request_motion_command(LOWORD(wparam));
          return TRUE;

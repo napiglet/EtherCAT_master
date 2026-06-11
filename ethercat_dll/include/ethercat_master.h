@@ -172,6 +172,13 @@ ECAT_API int ECAT_ServoMoveAbs(int slave_index, int target_position,
                                unsigned int velocity,
                                unsigned int acceleration,
                                unsigned int deceleration);
+ECAT_API int ECAT_ServoMoveRel(int slave_index, int distance,
+                               unsigned int velocity,
+                               unsigned int acceleration,
+                               unsigned int deceleration);
+ECAT_API int ECAT_ServoMoveVel(int slave_index, int target_velocity,
+                               unsigned int acceleration,
+                               unsigned int deceleration);
 ECAT_API int ECAT_ServoJog(int slave_index, int target_velocity,
                            unsigned int acceleration,
                            unsigned int deceleration);
@@ -180,6 +187,7 @@ ECAT_API int ECAT_ServoHome(int slave_index, signed char homing_method,
                             unsigned int latch_speed,
                             unsigned int acceleration);
 ECAT_API int ECAT_ServoStop(int slave_index);
+ECAT_API int ECAT_ServoGetPosition(int slave_index, int *position);
 ECAT_API int ECAT_LMS_MoveAbs(int slave_index, int target_position,
                               unsigned int velocity);
 ECAT_API int ECAT_LMS_MoveVel(int slave_index, int target_velocity);

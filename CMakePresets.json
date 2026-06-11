@@ -32,7 +32,8 @@
       "CMAKE_BUILD_TYPE": "RelWithDebInfo",
       "SOEM_BUILD_LMS_MASTER": true,
       "SOEM_BUILD_ETHERCAT_DLL": true,
-      "SOEM_BUILD_ETHERCAT_GUI": true
+      "SOEM_BUILD_ETHERCAT_GUI": true,
+      "SOEM_BUILD_LINUX_RT_CORE": true
     }
   }, {
     "name": "windows-msvc-vs2022",
@@ -46,7 +47,8 @@
     "cacheVariables": {
       "SOEM_BUILD_LMS_MASTER": true,
       "SOEM_BUILD_ETHERCAT_DLL": true,
-      "SOEM_BUILD_ETHERCAT_GUI": true
+      "SOEM_BUILD_ETHERCAT_GUI": true,
+      "SOEM_BUILD_LINUX_RT_CORE": true
     }
   }],
   "buildPresets": [{
@@ -55,12 +57,12 @@
   }, {
     "name": "windows-ninja",
     "configurePreset": "windows-ninja",
-    "targets": ["ethercat_dll", "ethercat_dll_test", "lms_master", "ethercat_gui"]
+    "targets": ["ethercat_dll", "ethercat_dll_test", "lms_master", "ethercat_gui", "motion_cia402_test"]
   }, {
     "name": "windows-msvc-vs2022",
     "configurePreset": "windows-msvc-vs2022",
     "configuration": "RelWithDebInfo",
-    "targets": ["ethercat_dll", "ethercat_dll_test", "lms_master", "ethercat_gui"]
+    "targets": ["ethercat_dll", "ethercat_dll_test", "lms_master", "ethercat_gui", "motion_cia402_test"]
   }, {
     "name": "docs",
     "configurePreset": "docs",

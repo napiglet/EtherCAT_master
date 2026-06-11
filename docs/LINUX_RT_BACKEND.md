@@ -30,6 +30,13 @@ Linux RT Controller
 - `ethercat_igh_backend_server` is a Linux-only IgH/Xenomai TCP backend server
   that runs the real cyclic PDO loop and talks to the Windows GUI/DLL over the
   existing protocol.
+- The backend now contains the first generic CiA402 motion profile layer:
+  - `MoveAbs` / `MoveRel`: internal trapezoidal position profile, emitted as
+    cyclic synchronous position PDO targets.
+  - `Jog` / `MoveVel`: cyclic synchronous velocity command with acceleration
+    and deceleration ramping.
+  - `Stop`: controlled velocity ramp to zero with CiA402 halt controlword.
+  - `Home`: homing mode command structure with velocity ramp support.
 - `ethercat_dll` can select either backend:
   - `ECAT_BACKEND_WINDOWS_DEBUG`
   - `ECAT_BACKEND_LINUX_RT`
@@ -44,6 +51,11 @@ ECAT_Open("Linux RT Controller", &options);
 
 ECAT_GetRuntimeStatus(&status);
 ECAT_GetSlaveInfo(1, &slave);
+ECAT_ServoEnable(1);
+ECAT_ServoMoveAbs(1, 12345, 5000, 10000, 10000);
+ECAT_ServoMoveRel(1, -1000, 5000, 10000, 10000);
+ECAT_ServoMoveVel(1, 100, 1000, 1000);
+ECAT_ServoStop(1);
 ECAT_LMS_MoveAbs(1, 12345, 5000);
 
 ECAT_Close();
@@ -122,6 +134,8 @@ cmake -S . -B build/linux-xenomai \
 
 cmake --build build/linux-xenomai --target ethercat_igh_lts_monitor -j$(nproc)
 cmake --build build/linux-xenomai --target ethercat_igh_backend_server -j$(nproc)
+cmake --build build/linux-xenomai --target motion_cia402_test -j$(nproc)
+./build/linux-xenomai/bin/motion_cia402_test
 ```
 
 Safe PDO exchange test. This does not enable the servo; the command outputs are
@@ -314,17 +328,22 @@ Windows side:
 2. Set host to the Linux controller IP address.
 3. Set port to `15000`.
 4. Open the connection.
+5. Use the Motion Control tab for Fault Reset, Enable, Stop, Jog, Move Abs,
+   Move Rel, and Home commands. The `Target` field is absolute position for
+   `Move Abs` and relative distance for `Move Rel`.
 
 The first server supports runtime status, WKC/cycle diagnostics, PDO snapshots,
 cached SDO reads/writes for the mapped CiA402 objects, Servo Enable/Disable,
-Fault Reset, Jog, Profile Position, Home, Stop, and LMS wrapper commands.
-It also applies a safe stop when the Windows client heartbeat is absent longer
-than `--client-timeout-ms`. GUI status polling sends `ECAT_NET_CMD_NONE`, which
-serves as the heartbeat.
+Fault Reset, Jog/MoveVel, trapezoidal MoveAbs/MoveRel, Home, Stop, and LMS
+wrapper commands. It also applies a safe stop when the Windows client heartbeat
+is absent longer than `--client-timeout-ms`. GUI status polling sends
+`ECAT_NET_CMD_NONE`, which serves as the heartbeat.
 
 ## Next Implementation Step
 
 1. Test `ethercat_igh_backend_server` with the Windows GUI over the network.
-2. Move the LTS-specific PDO profile into the XML database/profile loader.
-3. Add multi-slave support and per-slave CiA402 state machines.
-4. Start LMS-specific mover/stator abstractions above the generic motion layer.
+2. Tune motion limits with the real servo/motor connected:
+   velocity, acceleration, deceleration, following error, and soft limits.
+3. Move the LTS-specific PDO profile into the XML database/profile loader.
+4. Add multi-slave support and per-slave CiA402 state machines.
+5. Start LMS-specific mover/stator abstractions above the generic motion layer.

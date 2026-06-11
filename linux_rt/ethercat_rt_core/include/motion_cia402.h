@@ -56,8 +56,11 @@ typedef struct Cia402MotionCommand
    int32_t target_position;
    int32_t target_velocity;
    int32_t profile_velocity;
+   uint32_t acceleration;
+   uint32_t deceleration;
    int8_t mode;
    int pulse_cycles;
+   int relative;
 } Cia402MotionCommand;
 
 typedef struct Cia402PdoOutput
@@ -67,6 +70,24 @@ typedef struct Cia402PdoOutput
    int32_t target_velocity;
    int8_t mode;
 } Cia402PdoOutput;
+
+typedef struct Cia402MotionProfile
+{
+   Cia402MotionType type;
+   int active;
+   int done;
+   int relative;
+   int64_t cycles;
+   double position;
+   double velocity;
+   double target_position;
+   double target_velocity;
+   double max_velocity;
+   double acceleration;
+   double deceleration;
+   int32_t output_position;
+   int32_t output_velocity;
+} Cia402MotionProfile;
 
 Cia402State cia402_state_from_status(uint16_t statusword);
 const char *cia402_status_text(Cia402State state);
@@ -82,6 +103,17 @@ void cia402_motion_apply(const Cia402MotionCommand *command,
                          int sequence_done,
                          int cycle_after_sequence,
                          Cia402PdoOutput *output);
+void cia402_profile_reset(Cia402MotionProfile *profile);
+void cia402_profile_begin(Cia402MotionProfile *profile,
+                          const Cia402MotionCommand *command,
+                          int32_t actual_position,
+                          int32_t actual_velocity);
+int cia402_profile_step(Cia402MotionProfile *profile,
+                        const Cia402MotionCommand *command,
+                        int32_t actual_position,
+                        int32_t actual_velocity,
+                        int period_us,
+                        Cia402PdoOutput *output);
 
 #ifdef __cplusplus
 }

@@ -20,6 +20,25 @@ set_target_properties(ethercat_rt_core PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
+add_executable(motion_cia402_test
+  test/motion_cia402_test.c
+  src/motion_cia402.c
+  include/motion_cia402.h
+)
+
+target_include_directories(motion_cia402_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+
+target_compile_options(motion_cia402_test PRIVATE
+  $<$<C_COMPILER_ID:MSVC>:/W3>
+  $<$<C_COMPILER_ID:GNU>:-Wall -Wextra -Wno-unused-parameter>
+)
+
+set_target_properties(motion_cia402_test PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
 option(ECAT_RT_CORE_ENABLE_IGH "Build IgH/Xenomai EtherCAT monitor tools" OFF)
 set(ECAT_XENOMAI_CONFIG "/usr/xenomai/bin/xeno-config" CACHE FILEPATH
   "Path to Xenomai xeno-config")
