@@ -18,6 +18,38 @@ static double max_double(double lhs, double rhs)
    return lhs > rhs ? lhs : rhs;
 }
 
+static double clamp_double(double value, double min_value, double max_value)
+{
+   if (value < min_value)
+   {
+      return min_value;
+   }
+   if (value > max_value)
+   {
+      return max_value;
+   }
+   return value;
+}
+
+static int normalize_profile_type(int profile_type)
+{
+   switch (profile_type)
+   {
+   case CIA402_PROFILE_LMS:
+   case CIA402_PROFILE_TRAPEZOIDAL:
+   case CIA402_PROFILE_SCURVE:
+   case CIA402_PROFILE_JERK_RATIO:
+      return profile_type;
+   default:
+      return CIA402_PROFILE_TRAPEZOIDAL;
+   }
+}
+
+static double normalize_jerk_ratio(double jerk_ratio)
+{
+   return clamp_double(jerk_ratio, 0.0, 1.0);
+}
+
 static int32_t round_to_i32(double value)
 {
    if (value > (double)INT32_MAX)
@@ -165,6 +197,22 @@ const char *cia402_motion_text(Cia402MotionType type)
    }
 }
 
+const char *cia402_profile_type_text(int profile_type)
+{
+   switch (normalize_profile_type(profile_type))
+   {
+   case CIA402_PROFILE_LMS:
+      return "LMS";
+   case CIA402_PROFILE_SCURVE:
+      return "SCurve";
+   case CIA402_PROFILE_JERK_RATIO:
+      return "JerkRatio";
+   case CIA402_PROFILE_TRAPEZOIDAL:
+   default:
+      return "Trapezoidal";
+   }
+}
+
 uint16_t cia402_sequence_controlword(Cia402Sequence sequence,
                                      Cia402State state,
                                      uint16_t manual_controlword,
@@ -282,6 +330,8 @@ void cia402_motion_init(Cia402MotionCommand *command)
    command->mode = 0;
    command->pulse_cycles = 20;
    command->relative = 0;
+   command->profile_type = CIA402_PROFILE_TRAPEZOIDAL;
+   command->jerk_ratio = 0.75;
 }
 
 void cia402_motion_apply(const Cia402MotionCommand *command,
@@ -386,6 +436,9 @@ void cia402_profile_begin(Cia402MotionProfile *profile,
    profile->velocity = (double)actual_velocity;
    profile->output_position = actual_position;
    profile->output_velocity = actual_velocity;
+   profile->acceleration_state = 0.0;
+   profile->profile_type = normalize_profile_type(command->profile_type);
+   profile->jerk_ratio = normalize_jerk_ratio(command->jerk_ratio);
 
    switch (command->type)
    {
@@ -476,7 +529,113 @@ static double ramp_velocity(double current,
    return current + (delta > 0.0 ? limit : -limit);
 }
 
-static void step_position_profile(Cia402MotionProfile *profile, double dt_s)
+static double profile_ramp_time_s(const Cia402MotionProfile *profile)
+{
+   double ratio;
+
+   if (profile == 0)
+   {
+      return 0.0;
+   }
+
+   switch (normalize_profile_type(profile->profile_type))
+   {
+   case CIA402_PROFILE_LMS:
+      return 0.35;
+   case CIA402_PROFILE_SCURVE:
+      return 0.25;
+   case CIA402_PROFILE_JERK_RATIO:
+      ratio = normalize_jerk_ratio(profile->jerk_ratio);
+      return 0.03 + ratio * 0.30;
+   case CIA402_PROFILE_TRAPEZOIDAL:
+   default:
+      return 0.0;
+   }
+}
+
+static double slew_acceleration(Cia402MotionProfile *profile,
+                                double target_acceleration,
+                                double dt_s)
+{
+   double ramp_time;
+   double jerk_limit;
+   double max_acceleration;
+   double max_delta;
+   double delta;
+
+   ramp_time = profile_ramp_time_s(profile);
+   if (ramp_time <= 0.0)
+   {
+      profile->acceleration_state = target_acceleration;
+      return target_acceleration;
+   }
+
+   max_acceleration =
+      max_double(profile->acceleration, profile->deceleration);
+   if (max_acceleration <= 0.0)
+   {
+      profile->acceleration_state = target_acceleration;
+      return target_acceleration;
+   }
+
+   jerk_limit = max_acceleration / ramp_time;
+   max_delta = jerk_limit * dt_s;
+   delta = target_acceleration - profile->acceleration_state;
+   if (abs_double(delta) <= max_delta)
+   {
+      profile->acceleration_state = target_acceleration;
+   }
+   else
+   {
+      profile->acceleration_state += delta > 0.0 ? max_delta : -max_delta;
+   }
+   return profile->acceleration_state;
+}
+
+static double ramp_velocity_by_profile(Cia402MotionProfile *profile,
+                                       double target,
+                                       double dt_s)
+{
+   double delta;
+   double target_acceleration;
+   double acceleration;
+   double next_velocity;
+   double limit_acceleration;
+
+   if (profile_ramp_time_s(profile) <= 0.0)
+   {
+      return ramp_velocity(profile->velocity, target,
+                           profile->acceleration,
+                           profile->deceleration,
+                           dt_s);
+   }
+
+   delta = target - profile->velocity;
+   if (abs_double(delta) <= CIA402_VELOCITY_EPSILON)
+   {
+      profile->acceleration_state = 0.0;
+      return target;
+   }
+
+   limit_acceleration =
+      (target == 0.0 || abs_double(target) < abs_double(profile->velocity))
+         ? profile->deceleration
+         : profile->acceleration;
+   target_acceleration = delta > 0.0 ? limit_acceleration
+                                     : -limit_acceleration;
+   acceleration = slew_acceleration(profile, target_acceleration, dt_s);
+   next_velocity = profile->velocity + acceleration * dt_s;
+   if ((delta > 0.0 && next_velocity > target) ||
+       (delta < 0.0 && next_velocity < target))
+   {
+      next_velocity = target;
+      profile->acceleration_state = 0.0;
+   }
+   return next_velocity;
+}
+
+static void step_position_profile_trapezoidal(Cia402MotionProfile *profile,
+                                              double dt_s)
 {
    double error;
    double direction;
@@ -544,6 +703,116 @@ static void step_position_profile(Cia402MotionProfile *profile, double dt_s)
    }
 }
 
+static void step_position_profile_smooth(Cia402MotionProfile *profile,
+                                         double dt_s)
+{
+   double error;
+   double direction;
+   double velocity_along;
+   double next_velocity_along;
+   double stop_distance;
+   double remaining;
+   double target_velocity_along;
+   double target_acceleration;
+   double acceleration;
+
+   if (profile->done)
+   {
+      return;
+   }
+
+   error = profile->target_position - profile->position;
+   remaining = abs_double(error);
+   if (remaining <= CIA402_POSITION_EPSILON &&
+       abs_double(profile->velocity) <= CIA402_VELOCITY_EPSILON)
+   {
+      profile->position = profile->target_position;
+      profile->velocity = 0.0;
+      profile->acceleration_state = 0.0;
+      profile->done = 1;
+      return;
+   }
+
+   direction = error >= 0.0 ? 1.0 : -1.0;
+   velocity_along = profile->velocity * direction;
+   if (velocity_along < 0.0)
+   {
+      target_velocity_along = 0.0;
+   }
+   else if (velocity_along <= CIA402_VELOCITY_EPSILON)
+   {
+      target_velocity_along = profile->max_velocity;
+   }
+   else
+   {
+      stop_distance = (velocity_along * velocity_along) /
+                      (2.0 * profile->deceleration);
+      target_velocity_along =
+         remaining <= stop_distance + CIA402_POSITION_EPSILON
+            ? 0.0
+            : profile->max_velocity;
+   }
+
+   if (target_velocity_along > velocity_along + CIA402_VELOCITY_EPSILON)
+   {
+      target_acceleration = profile->acceleration;
+   }
+   else if (target_velocity_along < velocity_along - CIA402_VELOCITY_EPSILON)
+   {
+      target_acceleration = -profile->deceleration;
+   }
+   else
+   {
+      target_acceleration = 0.0;
+   }
+
+   acceleration = slew_acceleration(profile, target_acceleration, dt_s);
+   next_velocity_along = velocity_along + acceleration * dt_s;
+   if (target_acceleration > 0.0 &&
+       next_velocity_along > target_velocity_along)
+   {
+      next_velocity_along = target_velocity_along;
+   }
+   else if (target_acceleration < 0.0 &&
+            next_velocity_along < target_velocity_along)
+   {
+      next_velocity_along = target_velocity_along;
+   }
+
+   if (next_velocity_along < 0.0)
+   {
+      next_velocity_along = 0.0;
+   }
+   if (next_velocity_along > profile->max_velocity)
+   {
+      next_velocity_along = profile->max_velocity;
+   }
+
+   profile->velocity = direction * next_velocity_along;
+   profile->position += profile->velocity * dt_s;
+
+   if ((direction > 0.0 && profile->position >= profile->target_position) ||
+       (direction < 0.0 && profile->position <= profile->target_position))
+   {
+      profile->position = profile->target_position;
+      profile->velocity = 0.0;
+      profile->acceleration_state = 0.0;
+      profile->done = 1;
+   }
+}
+
+static void step_position_profile(Cia402MotionProfile *profile, double dt_s)
+{
+   if (profile_ramp_time_s(profile) <= 0.0)
+   {
+      step_position_profile_trapezoidal(profile, dt_s);
+   }
+   else
+   {
+      step_position_profile_smooth(profile, dt_s);
+   }
+}
+
 int cia402_profile_step(Cia402MotionProfile *profile,
                         const Cia402MotionCommand *command,
                         int32_t actual_position,
@@ -582,11 +851,7 @@ int cia402_profile_step(Cia402MotionProfile *profile,
 
    case CIA402_MOTION_JOG_VELOCITY:
       profile->velocity =
-         ramp_velocity(profile->velocity,
-                       profile->target_velocity,
-                       profile->acceleration,
-                       profile->deceleration,
-                       dt_s);
+         ramp_velocity_by_profile(profile, profile->target_velocity, dt_s);
       profile->position = (double)actual_position;
       profile->done = profile->target_velocity == 0.0 &&
                       abs_double(profile->velocity) <=
@@ -599,10 +864,7 @@ int cia402_profile_step(Cia402MotionProfile *profile,
 
    case CIA402_MOTION_SERVO_STOP:
       profile->velocity =
-         ramp_velocity(profile->velocity, 0.0,
-                       profile->acceleration,
-                       profile->deceleration,
-                       dt_s);
+         ramp_velocity_by_profile(profile, 0.0, dt_s);
       profile->position = (double)actual_position;
       profile->done = abs_double(profile->velocity) <= CIA402_VELOCITY_EPSILON;
       if (profile->done)
@@ -618,11 +880,7 @@ int cia402_profile_step(Cia402MotionProfile *profile,
    case CIA402_MOTION_HOME:
       profile->position = (double)actual_position;
       profile->velocity =
-         ramp_velocity(profile->velocity,
-                       profile->target_velocity,
-                       profile->acceleration,
-                       profile->deceleration,
-                       dt_s);
+         ramp_velocity_by_profile(profile, profile->target_velocity, dt_s);
       output->controlword = 0x001fU;
       output->target_position = actual_position;
       output->target_velocity = round_to_i32(profile->velocity);

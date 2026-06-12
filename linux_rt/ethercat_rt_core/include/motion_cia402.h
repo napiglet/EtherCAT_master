@@ -50,6 +50,14 @@ typedef enum Cia402MotionType
    CIA402_MOTION_HOME
 } Cia402MotionType;
 
+typedef enum Cia402ProfileType
+{
+   CIA402_PROFILE_LMS = 0,
+   CIA402_PROFILE_TRAPEZOIDAL = 1,
+   CIA402_PROFILE_SCURVE = 2,
+   CIA402_PROFILE_JERK_RATIO = 3
+} Cia402ProfileType;
+
 typedef struct Cia402MotionCommand
 {
    Cia402MotionType type;
@@ -61,6 +69,8 @@ typedef struct Cia402MotionCommand
    int8_t mode;
    int pulse_cycles;
    int relative;
+   int profile_type;
+   double jerk_ratio;
 } Cia402MotionCommand;
 
 typedef struct Cia402PdoOutput
@@ -85,6 +95,9 @@ typedef struct Cia402MotionProfile
    double max_velocity;
    double acceleration;
    double deceleration;
+   double acceleration_state;
+   int profile_type;
+   double jerk_ratio;
    int32_t output_position;
    int32_t output_velocity;
 } Cia402MotionProfile;
@@ -94,6 +107,7 @@ const char *cia402_status_text(Cia402State state);
 const char *cia402_mode_text(int8_t mode);
 const char *cia402_sequence_text(Cia402Sequence sequence);
 const char *cia402_motion_text(Cia402MotionType type);
+const char *cia402_profile_type_text(int profile_type);
 uint16_t cia402_sequence_controlword(Cia402Sequence sequence,
                                      Cia402State state,
                                      uint16_t manual_controlword,

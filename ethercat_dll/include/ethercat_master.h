@@ -37,6 +37,11 @@ extern "C" {
 #define ECAT_CIA402_MODE_CSV 9
 #define ECAT_CIA402_MODE_CST 10
 
+#define ECAT_PROFILE_LMS 0
+#define ECAT_PROFILE_TRAPEZOIDAL 1
+#define ECAT_PROFILE_SCURVE 2
+#define ECAT_PROFILE_JERK_RATIO 3
+
 #define ECAT_BACKEND_WINDOWS_DEBUG 0
 #define ECAT_BACKEND_LINUX_RT 1
 
@@ -134,6 +139,8 @@ ECAT_API int ECAT_SetBackend(int backend_type);
 ECAT_API int ECAT_GetBackend(int *backend_type);
 ECAT_API int ECAT_SetLinuxRtEndpoint(const char *host, int port);
 ECAT_API int ECAT_GetLinuxRtEndpoint(char *host, int host_size, int *port);
+ECAT_API int ECAT_SetMotionProfile(int profile_type, double jerk_ratio);
+ECAT_API int ECAT_GetMotionProfile(int *profile_type, double *jerk_ratio);
 ECAT_API int ECAT_ListAdapters(ECAT_AdapterInfo *adapters, int max_count,
                                int *actual_count);
 ECAT_API int ECAT_Open(const char *adapter_name,

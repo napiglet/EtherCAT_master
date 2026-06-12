@@ -15,6 +15,7 @@ extern "C" {
 #define ECAT_NET_MAX_PDO_COPY 64
 #define ECAT_NET_MAX_TEXT 256
 #define ECAT_NET_MAX_NAME 64
+#define ECAT_NET_CMD_FLAG_PROFILE_VALID 0x00000001u
 
 typedef enum ECAT_NetMessageType
 {
@@ -130,6 +131,9 @@ typedef struct ECAT_NetCommand
    int32_t homing_method;
    uint32_t search_speed;
    uint32_t latch_speed;
+   uint32_t command_flags;
+   int32_t profile_type;
+   int32_t jerk_ratio_permille;
 } ECAT_NetCommand;
 
 typedef struct ECAT_NetSdoRequest

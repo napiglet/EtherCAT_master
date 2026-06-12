@@ -611,6 +611,30 @@ static void backend_command_safe_stop(BackendCommand *command)
    cia402_motion_init(&command->motion);
 }
 
+static void backend_apply_motion_profile(Cia402MotionCommand *motion,
+                                         const ECAT_NetCommand *net_command,
+                                         int force_lms)
+{
+   if (motion == NULL || net_command == NULL)
+   {
+      return;
+   }
+
+   if (force_lms)
+   {
+      motion->profile_type = CIA402_PROFILE_LMS;
+      motion->jerk_ratio = 0.35;
+      return;
+   }
+
+   if ((net_command->command_flags & ECAT_NET_CMD_FLAG_PROFILE_VALID) != 0U)
+   {
+      motion->profile_type = net_command->profile_type;
+      motion->jerk_ratio =
+         (double)net_command->jerk_ratio_permille / 1000.0;
+   }
+}
+
 static void runtime_mark_client_message(BackendRuntime *rt)
 {
    pthread_mutex_lock(&rt->lock);
@@ -635,6 +659,7 @@ static void runtime_apply_command(BackendRuntime *rt,
                                   const ECAT_NetCommand *net_command)
 {
    BackendCommand *command;
+   ECAT_NetCommandType command_type;
 
    if (net_command == NULL)
    {
@@ -643,8 +668,9 @@ static void runtime_apply_command(BackendRuntime *rt,
 
    pthread_mutex_lock(&rt->lock);
    command = &rt->command;
+   command_type = (ECAT_NetCommandType)net_command->command;
 
-   switch ((ECAT_NetCommandType)net_command->command)
+   switch (command_type)
    {
    case ECAT_NET_CMD_NONE:
    case ECAT_NET_CMD_START:
@@ -689,6 +715,8 @@ static void runtime_apply_command(BackendRuntime *rt,
       command->target_position = net_command->target_position;
       command->sequence = CIA402_SEQ_ENABLE;
       cia402_motion_init(&command->motion);
+      backend_apply_motion_profile(&command->motion, net_command,
+                                   command_type == ECAT_NET_CMD_LMS_MOVE_ABS);
       command->motion.type = CIA402_MOTION_PROFILE_POSITION;
       command->motion.mode = CIA402_MODE_CSP;
       command->motion.target_position = net_command->target_position;
@@ -703,6 +731,7 @@ static void runtime_apply_command(BackendRuntime *rt,
       command->target_position = net_command->target_position;
       command->sequence = CIA402_SEQ_ENABLE;
       cia402_motion_init(&command->motion);
+      backend_apply_motion_profile(&command->motion, net_command, 0);
       command->motion.type = CIA402_MOTION_PROFILE_POSITION;
       command->motion.mode = CIA402_MODE_CSP;
       command->motion.target_position = net_command->target_position;
@@ -718,6 +747,8 @@ static void runtime_apply_command(BackendRuntime *rt,
       command->target_velocity = net_command->target_velocity;
       command->sequence = CIA402_SEQ_ENABLE;
       cia402_motion_init(&command->motion);
+      backend_apply_motion_profile(&command->motion, net_command,
+                                   command_type == ECAT_NET_CMD_LMS_MOVE_VEL);
       command->motion.type = CIA402_MOTION_JOG_VELOCITY;
       command->motion.mode = CIA402_MODE_CSV;
       command->motion.target_velocity = net_command->target_velocity;
@@ -729,6 +760,7 @@ static void runtime_apply_command(BackendRuntime *rt,
    case ECAT_NET_CMD_SERVO_HOME:
       command->sequence = CIA402_SEQ_ENABLE;
       cia402_motion_init(&command->motion);
+      backend_apply_motion_profile(&command->motion, net_command, 0);
       command->motion.type = CIA402_MOTION_HOME;
       command->motion.mode = CIA402_MODE_HOMING;
       command->motion.target_velocity = (int32_t)net_command->search_speed;
@@ -741,6 +773,8 @@ static void runtime_apply_command(BackendRuntime *rt,
    case ECAT_NET_CMD_LMS_STOP:
       command->sequence = CIA402_SEQ_NONE;
       cia402_motion_init(&command->motion);
+      backend_apply_motion_profile(&command->motion, net_command,
+                                   command_type == ECAT_NET_CMD_LMS_STOP);
       command->motion.type = CIA402_MOTION_SERVO_STOP;
       command->motion.mode = CIA402_MODE_CSV;
       command->motion.deceleration = net_command->deceleration;
@@ -1262,7 +1296,7 @@ static void *rt_thread_main(void *arg)
       rt->status.runtime.period_us = options.period_us;
       (void)snprintf(rt->status.runtime.state_text,
                      sizeof(rt->status.runtime.state_text),
-                     "IgH %s, slave %s, CiA402 %s, mode %s, seq %s, motion %s%s",
+                     "IgH %s, slave %s, CiA402 %s, mode %s, seq %s, motion %s%s, profile %s",
                      wc_state_text(domain_state.wc_state),
                      sc_state.operational ? "OP" : "not OP",
                      cia402_status_text(drive_state),
@@ -1273,7 +1307,8 @@ static void *rt_thread_main(void *arg)
                      (command.motion.type != CIA402_MOTION_NONE &&
                       !safety_stop_active)
                         ? (profile_done ? "/Done" : "/Running")
-                        : "");
+                        : "",
+                     cia402_profile_type_text(command.motion.profile_type));
       if (safety_stop_active)
       {
          safe_copy(rt->status.runtime.last_error,

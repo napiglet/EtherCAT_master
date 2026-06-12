@@ -59,6 +59,7 @@ typedef struct GuiState
    HWND motion_accel;
    HWND motion_decel;
    HWND motion_home_method;
+   HWND motion_profile;
    HWND motion_fault_reset;
    HWND motion_enable;
    HWND motion_disable;
@@ -76,7 +77,7 @@ typedef struct GuiState
    HWND xml_detail;
    HWND log_edit;
    HWND sdo_labels[4];
-   HWND motion_labels[6];
+   HWND motion_labels[7];
    HWND rt_labels[2];
    int active_tab;
    int selected_slave;
@@ -278,10 +279,11 @@ static void show_tab_controls(int tab)
    ShowWindow(G_gui.sdo_read, show_sdo);
    ShowWindow(G_gui.sdo_result, show_sdo);
 
-   for (i = 0; i < 6; ++i)
+   for (i = 0; i < 7; ++i)
    {
       ShowWindow(G_gui.motion_labels[i], show_motion);
    }
+   ShowWindow(G_gui.motion_profile, show_motion);
    ShowWindow(G_gui.motion_slave, show_motion);
    ShowWindow(G_gui.motion_target, show_motion);
    ShowWindow(G_gui.motion_velocity, show_motion);
@@ -336,6 +338,7 @@ static void bind_controls(HWND hwnd)
    G_gui.motion_accel = GetDlgItem(hwnd, IDC_MOTION_ACCEL);
    G_gui.motion_decel = GetDlgItem(hwnd, IDC_MOTION_DECEL);
    G_gui.motion_home_method = GetDlgItem(hwnd, IDC_MOTION_HOME_METHOD);
+   G_gui.motion_profile = GetDlgItem(hwnd, IDC_MOTION_PROFILE);
    G_gui.motion_fault_reset = GetDlgItem(hwnd, IDC_MOTION_FAULT_RESET);
    G_gui.motion_enable = GetDlgItem(hwnd, IDC_MOTION_ENABLE);
    G_gui.motion_disable = GetDlgItem(hwnd, IDC_MOTION_DISABLE);
@@ -362,12 +365,18 @@ static void bind_controls(HWND hwnd)
    G_gui.motion_labels[3] = GetDlgItem(hwnd, IDC_MOTION_ACCEL_LABEL);
    G_gui.motion_labels[4] = GetDlgItem(hwnd, IDC_MOTION_DECEL_LABEL);
    G_gui.motion_labels[5] = GetDlgItem(hwnd, IDC_MOTION_HOME_METHOD_LABEL);
+   G_gui.motion_labels[6] = GetDlgItem(hwnd, IDC_MOTION_PROFILE_LABEL);
    G_gui.rt_labels[0] = GetDlgItem(hwnd, IDC_RT_HOST_LABEL);
    G_gui.rt_labels[1] = GetDlgItem(hwnd, IDC_RT_PORT_LABEL);
 
    SendMessageA(G_gui.backend, CB_ADDSTRING, 0, (LPARAM)"Windows Local");
    SendMessageA(G_gui.backend, CB_ADDSTRING, 0, (LPARAM)"Linux RT");
    SendMessageA(G_gui.backend, CB_SETCURSEL, 0, 0);
+   SendMessageA(G_gui.motion_profile, CB_ADDSTRING, 0, (LPARAM)"0 LMS");
+   SendMessageA(G_gui.motion_profile, CB_ADDSTRING, 0, (LPARAM)"1 Trapezoidal");
+   SendMessageA(G_gui.motion_profile, CB_ADDSTRING, 0, (LPARAM)"2 SCurve");
+   SendMessageA(G_gui.motion_profile, CB_ADDSTRING, 0, (LPARAM)"3 JerkRatio");
+   SendMessageA(G_gui.motion_profile, CB_SETCURSEL, 1, 0);
    SendMessageA(G_gui.rt_host, EM_SETLIMITTEXT, 63, 0);
    SendMessageA(G_gui.rt_port, EM_SETLIMITTEXT, 5, 0);
    SendMessageA(G_gui.period, EM_SETLIMITTEXT, 8, 0);
@@ -381,7 +390,7 @@ static void bind_controls(HWND hwnd)
    SendMessageA(G_gui.motion_decel, EM_SETLIMITTEXT, 10, 0);
    SendMessageA(G_gui.motion_home_method, EM_SETLIMITTEXT, 6, 0);
    SetWindowTextA(G_gui.period, "1000");
-   SetWindowTextA(G_gui.rt_host, "127.0.0.1");
+   SetWindowTextA(G_gui.rt_host, "192.168.100.20");
    SetWindowTextA(G_gui.rt_port, "15000");
    SetWindowTextA(G_gui.sdo_slave, "1");
    SetWindowTextA(G_gui.sdo_index, "0x6041");
@@ -472,29 +481,31 @@ static void layout_controls(HWND hwnd)
    MoveWindow(G_gui.sdo_result, tab_rc.left, tab_y + 34,
               tab_rc.right - tab_rc.left, tab_rc.bottom - tab_y - 34, TRUE);
 
-   MoveWindow(G_gui.motion_labels[0], tab_rc.left, tab_y + 4, 40, 22, TRUE);
-   MoveWindow(G_gui.motion_slave, tab_rc.left + 44, tab_y, 50, 24, TRUE);
-   MoveWindow(G_gui.motion_labels[1], tab_rc.left + 108, tab_y + 4, 44, 22, TRUE);
-   MoveWindow(G_gui.motion_target, tab_rc.left + 154, tab_y, 82, 24, TRUE);
-   MoveWindow(G_gui.motion_labels[2], tab_rc.left + 248, tab_y + 4, 58, 22, TRUE);
-   MoveWindow(G_gui.motion_velocity, tab_rc.left + 308, tab_y, 82, 24, TRUE);
-   MoveWindow(G_gui.motion_labels[3], tab_rc.left + 404, tab_y + 4, 44, 22, TRUE);
-   MoveWindow(G_gui.motion_accel, tab_rc.left + 450, tab_y, 70, 24, TRUE);
-   MoveWindow(G_gui.motion_labels[4], tab_rc.left + 532, tab_y + 4, 44, 22, TRUE);
-   MoveWindow(G_gui.motion_decel, tab_rc.left + 578, tab_y, 70, 24, TRUE);
-   MoveWindow(G_gui.motion_labels[5], tab_rc.left + 660, tab_y + 4, 44, 22, TRUE);
-   MoveWindow(G_gui.motion_home_method, tab_rc.left + 706, tab_y, 50, 24, TRUE);
-   MoveWindow(G_gui.motion_fault_reset, tab_rc.left, tab_y + 34, 96, 26, TRUE);
-   MoveWindow(G_gui.motion_enable, tab_rc.left + 104, tab_y + 34, 76, 26, TRUE);
-   MoveWindow(G_gui.motion_disable, tab_rc.left + 188, tab_y + 34, 76, 26, TRUE);
-   MoveWindow(G_gui.motion_stop, tab_rc.left + 272, tab_y + 34, 76, 26, TRUE);
-   MoveWindow(G_gui.motion_jog_pos, tab_rc.left + 356, tab_y + 34, 72, 26, TRUE);
-   MoveWindow(G_gui.motion_jog_neg, tab_rc.left + 436, tab_y + 34, 72, 26, TRUE);
-   MoveWindow(G_gui.motion_move_abs, tab_rc.left + 516, tab_y + 34, 82, 26, TRUE);
-   MoveWindow(G_gui.motion_move_rel, tab_rc.left + 606, tab_y + 34, 82, 26, TRUE);
-   MoveWindow(G_gui.motion_home, tab_rc.left + 696, tab_y + 34, 60, 26, TRUE);
-   MoveWindow(G_gui.motion_status, tab_rc.left, tab_y + 72,
-              tab_rc.right - tab_rc.left, tab_rc.bottom - tab_y - 72, TRUE);
+   MoveWindow(G_gui.motion_labels[6], tab_rc.left, tab_y + 4, 82, 22, TRUE);
+   MoveWindow(G_gui.motion_profile, tab_rc.left + 86, tab_y, 132, 120, TRUE);
+   MoveWindow(G_gui.motion_labels[0], tab_rc.left + 232, tab_y + 4, 40, 22, TRUE);
+   MoveWindow(G_gui.motion_slave, tab_rc.left + 276, tab_y, 50, 24, TRUE);
+   MoveWindow(G_gui.motion_labels[1], tab_rc.left + 340, tab_y + 4, 44, 22, TRUE);
+   MoveWindow(G_gui.motion_target, tab_rc.left + 386, tab_y, 82, 24, TRUE);
+   MoveWindow(G_gui.motion_labels[2], tab_rc.left, tab_y + 34, 58, 22, TRUE);
+   MoveWindow(G_gui.motion_velocity, tab_rc.left + 62, tab_y + 30, 82, 24, TRUE);
+   MoveWindow(G_gui.motion_labels[3], tab_rc.left + 158, tab_y + 34, 44, 22, TRUE);
+   MoveWindow(G_gui.motion_accel, tab_rc.left + 204, tab_y + 30, 70, 24, TRUE);
+   MoveWindow(G_gui.motion_labels[4], tab_rc.left + 286, tab_y + 34, 44, 22, TRUE);
+   MoveWindow(G_gui.motion_decel, tab_rc.left + 332, tab_y + 30, 70, 24, TRUE);
+   MoveWindow(G_gui.motion_labels[5], tab_rc.left + 414, tab_y + 34, 44, 22, TRUE);
+   MoveWindow(G_gui.motion_home_method, tab_rc.left + 460, tab_y + 30, 50, 24, TRUE);
+   MoveWindow(G_gui.motion_fault_reset, tab_rc.left, tab_y + 66, 96, 26, TRUE);
+   MoveWindow(G_gui.motion_enable, tab_rc.left + 104, tab_y + 66, 76, 26, TRUE);
+   MoveWindow(G_gui.motion_disable, tab_rc.left + 188, tab_y + 66, 76, 26, TRUE);
+   MoveWindow(G_gui.motion_stop, tab_rc.left + 272, tab_y + 66, 76, 26, TRUE);
+   MoveWindow(G_gui.motion_jog_pos, tab_rc.left, tab_y + 98, 72, 26, TRUE);
+   MoveWindow(G_gui.motion_jog_neg, tab_rc.left + 80, tab_y + 98, 72, 26, TRUE);
+   MoveWindow(G_gui.motion_move_abs, tab_rc.left + 160, tab_y + 98, 82, 26, TRUE);
+   MoveWindow(G_gui.motion_move_rel, tab_rc.left + 250, tab_y + 98, 82, 26, TRUE);
+   MoveWindow(G_gui.motion_home, tab_rc.left + 340, tab_y + 98, 60, 26, TRUE);
+   MoveWindow(G_gui.motion_status, tab_rc.left, tab_y + 132,
+              tab_rc.right - tab_rc.left, tab_rc.bottom - tab_y - 132, TRUE);
 
    MoveWindow(G_gui.stats_edit, tab_rc.left, tab_rc.top,
               tab_rc.right - tab_rc.left, tab_rc.bottom - tab_rc.top, TRUE);
@@ -926,11 +937,71 @@ static int get_motion_slave(void)
    return slave;
 }
 
+static const char *motion_profile_name(int profile_type)
+{
+   switch (profile_type)
+   {
+   case ECAT_PROFILE_LMS:
+      return "0 LMS";
+   case ECAT_PROFILE_SCURVE:
+      return "2 SCurve";
+   case ECAT_PROFILE_JERK_RATIO:
+      return "3 JerkRatio";
+   case ECAT_PROFILE_TRAPEZOIDAL:
+   default:
+      return "1 Trapezoidal";
+   }
+}
+
+static int get_motion_profile_type(void)
+{
+   int selected =
+      (int)SendMessageA(G_gui.motion_profile, CB_GETCURSEL, 0, 0);
+
+   switch (selected)
+   {
+   case 0:
+      return ECAT_PROFILE_LMS;
+   case 2:
+      return ECAT_PROFILE_SCURVE;
+   case 3:
+      return ECAT_PROFILE_JERK_RATIO;
+   case 1:
+   default:
+      return ECAT_PROFILE_TRAPEZOIDAL;
+   }
+}
+
+static double get_motion_profile_jerk_ratio(int profile_type)
+{
+   switch (profile_type)
+   {
+   case ECAT_PROFILE_LMS:
+      return 0.35;
+   case ECAT_PROFILE_SCURVE:
+      return 1.0;
+   case ECAT_PROFILE_JERK_RATIO:
+      return 0.75;
+   case ECAT_PROFILE_TRAPEZOIDAL:
+   default:
+      return 0.0;
+   }
+}
+
+static int apply_motion_profile_setting(void)
+{
+   int profile_type = get_motion_profile_type();
+   double jerk_ratio = get_motion_profile_jerk_ratio(profile_type);
+   return ECAT_SetMotionProfile(profile_type, jerk_ratio);
+}
+
 static void format_motion_status(char *dst, size_t dst_size)
 {
    ECAT_ServoStatus status;
    int slave = get_motion_slave();
    int result;
+   int profile_type = ECAT_PROFILE_TRAPEZOIDAL;
+   double jerk_ratio = 0.0;
 
    if (!ECAT_IsOpen())
    {
@@ -950,6 +1021,7 @@ static void format_motion_status(char *dst, size_t dst_size)
       return;
    }
 
+   (void)ECAT_GetMotionProfile(&profile_type, &jerk_ratio);
    (void)snprintf(dst, dst_size,
                   "Selected slave\r\n"
                   "  Slave              : %d\r\n\r\n"
@@ -969,7 +1041,9 @@ static void format_motion_status(char *dst, size_t dst_size)
                   "  Velocity/Jog       : %d\r\n"
                   "  Acceleration       : %u\r\n"
                   "  Deceleration       : %u\r\n"
-                  "  Homing method      : %d\r\n",
+                  "  Homing method      : %d\r\n"
+                  "  Profile type       : %s\r\n"
+                  "  Jerk ratio         : %.2f\r\n",
                   slave,
                   status.cia402_state,
                   status.statusword,
@@ -985,7 +1059,9 @@ static void format_motion_status(char *dst, size_t dst_size)
                   get_edit_i32(G_gui.motion_velocity, 0),
                   get_edit_u32(G_gui.motion_accel, 0),
                   get_edit_u32(G_gui.motion_decel, 0),
-                  get_edit_i32(G_gui.motion_home_method, 35));
+                  get_edit_i32(G_gui.motion_home_method, 35),
+                  motion_profile_name(profile_type),
+                  jerk_ratio);
 }
 
 static void finish_motion_command(const char *name, int result)
@@ -1018,6 +1094,12 @@ static void request_motion_command(int control_id)
    {
       MessageBoxA(G_gui.hwnd, "Connect the EtherCAT backend first.",
                   APP_TITLE, MB_ICONWARNING | MB_OK);
+      return;
+   }
+   result = apply_motion_profile_setting();
+   if (result != ECAT_OK)
+   {
+      finish_motion_command("Set Motion Profile", result);
       return;
    }
 
@@ -1263,6 +1345,7 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg, WPARAM wparam,
       bind_controls(hwnd);
       layout_controls(hwnd);
       ECAT_SetLogCallback(dll_log_callback);
+      (void)apply_motion_profile_setting();
       refresh_adapters();
       update_xml_list();
       SetTimer(hwnd, UPDATE_TIMER_ID, UPDATE_TIMER_MS, NULL);
@@ -1287,6 +1370,13 @@ static INT_PTR CALLBACK MainDlgProc(HWND hwnd, UINT msg, WPARAM wparam,
          if (HIWORD(wparam) == CBN_SELCHANGE)
          {
             refresh_adapters();
+            return TRUE;
+         }
+         break;
+      case IDC_MOTION_PROFILE:
+         if (HIWORD(wparam) == CBN_SELCHANGE)
+         {
+            (void)apply_motion_profile_setting();
             return TRUE;
          }
          break;

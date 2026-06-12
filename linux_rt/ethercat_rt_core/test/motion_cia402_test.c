@@ -60,6 +60,51 @@ static void test_absolute_profile(void)
    check_int("absolute profile velocity", output.target_velocity, 0);
 }
 
+static void test_profile_types(void)
+{
+   int profile_types[] = {
+      CIA402_PROFILE_LMS,
+      CIA402_PROFILE_TRAPEZOIDAL,
+      CIA402_PROFILE_SCURVE,
+      CIA402_PROFILE_JERK_RATIO
+   };
+   int i;
+
+   for (i = 0; i < (int)(sizeof(profile_types) / sizeof(profile_types[0])); ++i)
+   {
+      Cia402MotionCommand command = make_position_command(1000, 0);
+      Cia402MotionProfile profile;
+      Cia402PdoOutput output = {0};
+      int done = 0;
+      int cycle;
+
+      command.profile_type = profile_types[i];
+      command.jerk_ratio = 0.75;
+      if (command.profile_type == CIA402_PROFILE_LMS)
+      {
+         command.jerk_ratio = 0.35;
+      }
+      cia402_profile_reset(&profile);
+      for (cycle = 0; cycle < 10000 && !done; ++cycle)
+      {
+         done = cia402_profile_step(&profile, &command,
+                                    output.target_position, 0, 1000, &output);
+         check_true("profile type lower bound", output.target_position >= 0);
+         check_true("profile type upper bound", output.target_position <= 1000);
+      }
+
+      if (!done)
+      {
+         fprintf(stderr, "profile type %d completed failed, pos=%d vel=%d\n",
+                 command.profile_type, output.target_position,
+                 output.target_velocity);
+         exit(1);
+      }
+      check_int("profile type target", output.target_position, 1000);
+      check_int("profile type velocity", output.target_velocity, 0);
+   }
+}
+
 static void test_relative_profile(void)
 {
    Cia402MotionCommand command = make_position_command(-50, 1);
@@ -134,6 +179,7 @@ static void test_stop_profile(void)
 int main(void)
 {
    test_absolute_profile();
+   test_profile_types();
    test_relative_profile();
    test_jog_velocity_profile();
    test_stop_profile();

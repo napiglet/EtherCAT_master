@@ -31,8 +31,15 @@ Linux RT Controller
   that runs the real cyclic PDO loop and talks to the Windows GUI/DLL over the
   existing protocol.
 - The backend now contains the first generic CiA402 motion profile layer:
-  - `MoveAbs` / `MoveRel`: internal trapezoidal position profile, emitted as
-    cyclic synchronous position PDO targets.
+  - `MoveAbs` / `MoveRel`: internal cyclic synchronous position profiles,
+    emitted as CSP PDO targets.
+  - Profile types are selected through `ECAT_SetMotionProfile()` and the GUI
+    Motion Control tab:
+    - `ECAT_PROFILE_LMS`: conservative smooth profile for early LMS mover tests.
+    - `ECAT_PROFILE_TRAPEZOIDAL`: default profile, matching the original
+      behavior.
+    - `ECAT_PROFILE_SCURVE`: smoothed acceleration profile.
+    - `ECAT_PROFILE_JERK_RATIO`: jerk-ratio smoothed profile.
   - `Jog` / `MoveVel`: cyclic synchronous velocity command with acceleration
     and deceleration ramping.
   - `Stop`: controlled velocity ramp to zero with CiA402 halt controlword.
@@ -52,6 +59,7 @@ ECAT_Open("Linux RT Controller", &options);
 ECAT_GetRuntimeStatus(&status);
 ECAT_GetSlaveInfo(1, &slave);
 ECAT_ServoEnable(1);
+ECAT_SetMotionProfile(ECAT_PROFILE_TRAPEZOIDAL, 0.0);
 ECAT_ServoMoveAbs(1, 12345, 5000, 10000, 10000);
 ECAT_ServoMoveRel(1, -1000, 5000, 10000, 10000);
 ECAT_ServoMoveVel(1, 100, 1000, 1000);

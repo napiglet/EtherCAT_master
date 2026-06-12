@@ -49,6 +49,8 @@ typedef struct EthercatCore
    int backend_type;
    char linux_rt_host[64];
    int linux_rt_port;
+   int motion_profile_type;
+   double motion_jerk_ratio;
    UINT_PTR rt_socket;
    unsigned int rt_sequence;
    ECAT_RuntimeStatus status;
@@ -75,6 +77,8 @@ static int db_find_match_threadsafe(unsigned int vendor_id,
                                     unsigned int product_code,
                                     unsigned int revision,
                                     ECAT_DbEntry *entry);
+static int normalize_motion_profile_type(int profile_type);
+static double normalize_jerk_ratio(double jerk_ratio);
 
 static BOOL CALLBACK init_once_callback(PINIT_ONCE init_once, PVOID parameter,
                                         PVOID *context)
@@ -91,6 +95,8 @@ static BOOL CALLBACK init_once_callback(PINIT_ONCE init_once, PVOID parameter,
    G_core.backend_type = ECAT_BACKEND_WINDOWS_DEBUG;
    G_core.rt_socket = ECAT_INVALID_SOCKET_HANDLE;
    G_core.linux_rt_port = ECAT_DEFAULT_LINUX_RT_PORT;
+   G_core.motion_profile_type = ECAT_PROFILE_TRAPEZOIDAL;
+   G_core.motion_jerk_ratio = 0.75;
    safe_copy(G_core.linux_rt_host, sizeof(G_core.linux_rt_host),
              ECAT_DEFAULT_LINUX_RT_HOST);
    {
@@ -122,6 +128,33 @@ static void safe_copy(char *dst, size_t dst_size, const char *src)
       src = "";
    }
    (void)snprintf(dst, dst_size, "%s", src);
+}
+
+static int normalize_motion_profile_type(int profile_type)
+{
+   switch (profile_type)
+   {
+   case ECAT_PROFILE_LMS:
+   case ECAT_PROFILE_TRAPEZOIDAL:
+   case ECAT_PROFILE_SCURVE:
+   case ECAT_PROFILE_JERK_RATIO:
+      return profile_type;
+   default:
+      return ECAT_PROFILE_TRAPEZOIDAL;
+   }
+}
+
+static double normalize_jerk_ratio(double jerk_ratio)
+{
+   if (jerk_ratio < 0.0)
+   {
+      return 0.0;
+   }
+   if (jerk_ratio > 1.0)
+   {
+      return 1.0;
+   }
+   return jerk_ratio;
 }
 
 static int is_linux_rt_backend(void)
@@ -509,8 +542,26 @@ static int rt_send_motion_command(ECAT_NetCommandType type, int slave_index,
 {
    ECAT_NetCommand command;
    int result;
+   int profile_type;
+   double jerk_ratio;
+   int jerk_ratio_permille;
 
    memset(&command, 0, sizeof(command));
+   EnterCriticalSection(&G_core.state_lock);
+   profile_type = G_core.motion_profile_type;
+   jerk_ratio = G_core.motion_jerk_ratio;
+   LeaveCriticalSection(&G_core.state_lock);
+
+   if (type == ECAT_NET_CMD_LMS_MOVE_ABS ||
+       type == ECAT_NET_CMD_LMS_MOVE_VEL ||
+       type == ECAT_NET_CMD_LMS_STOP)
+   {
+      profile_type = ECAT_PROFILE_LMS;
+      jerk_ratio = 0.35;
+   }
+   jerk_ratio = normalize_jerk_ratio(jerk_ratio);
+   jerk_ratio_permille = (int)(jerk_ratio * 1000.0 + 0.5);
+
    command.command = (int)type;
    command.slave_index = slave_index;
    command.target_position = target_position;
@@ -522,6 +573,9 @@ static int rt_send_motion_command(ECAT_NetCommandType type, int slave_index,
    command.homing_method = homing_method;
    command.search_speed = search_speed;
    command.latch_speed = latch_speed;
+   command.command_flags = ECAT_NET_CMD_FLAG_PROFILE_VALID;
+   command.profile_type = profile_type;
+   command.jerk_ratio_permille = jerk_ratio_permille;
 
    EnterCriticalSection(&G_core.rt_lock);
    result = rt_send_command_locked(&command);
@@ -1947,6 +2001,34 @@ int ECAT_GetLinuxRtEndpoint(char *host, int host_size, int *port)
    return ECAT_OK;
 }
 
+int ECAT_SetMotionProfile(int profile_type, double jerk_ratio)
+{
+   ensure_initialized();
+   profile_type = normalize_motion_profile_type(profile_type);
+   jerk_ratio = normalize_jerk_ratio(jerk_ratio);
+
+   EnterCriticalSection(&G_core.state_lock);
+   G_core.motion_profile_type = profile_type;
+   G_core.motion_jerk_ratio = jerk_ratio;
+   LeaveCriticalSection(&G_core.state_lock);
+   return ECAT_OK;
+}
+
+int ECAT_GetMotionProfile(int *profile_type, double *jerk_ratio)
+{
+   ensure_initialized();
+   if (profile_type == NULL || jerk_ratio == NULL)
+   {
+      return ECAT_INVALID_ARGUMENT;
+   }
+
+   EnterCriticalSection(&G_core.state_lock);
+   *profile_type = G_core.motion_profile_type;
+   *jerk_ratio = G_core.motion_jerk_ratio;
+   LeaveCriticalSection(&G_core.state_lock);
+   return ECAT_OK;
+}
+
 int ECAT_ListAdapters(ECAT_AdapterInfo *adapters, int max_count,
                       int *actual_count)
 {
@@ -2798,16 +2880,48 @@ int ECAT_ServoGetPosition(int slave_index, int *position)
 int ECAT_LMS_MoveAbs(int slave_index, int target_position,
                      unsigned int velocity)
 {
+   ensure_initialized();
+   if (slave_index <= 0)
+   {
+      return ECAT_INVALID_ARGUMENT;
+   }
+   if (is_linux_rt_backend())
+   {
+      return rt_send_motion_command(ECAT_NET_CMD_LMS_MOVE_ABS,
+                                    slave_index, target_position, 0, velocity,
+                                    0, 0, 0, 0, 0, 0);
+   }
    return ECAT_ServoMoveAbs(slave_index, target_position, velocity, 0, 0);
 }
 
 int ECAT_LMS_MoveVel(int slave_index, int target_velocity)
 {
+   ensure_initialized();
+   if (slave_index <= 0)
+   {
+      return ECAT_INVALID_ARGUMENT;
+   }
+   if (is_linux_rt_backend())
+   {
+      return rt_send_motion_command(ECAT_NET_CMD_LMS_MOVE_VEL,
+                                    slave_index, 0, target_velocity, 0,
+                                    0, 0, 0, 0, 0, 0);
+   }
    return ECAT_ServoJog(slave_index, target_velocity, 0, 0);
 }
 
 int ECAT_LMS_Stop(int slave_index)
 {
+   ensure_initialized();
+   if (slave_index <= 0)
+   {
+      return ECAT_INVALID_ARGUMENT;
+   }
+   if (is_linux_rt_backend())
+   {
+      return rt_send_motion_command(ECAT_NET_CMD_LMS_STOP,
+                                    slave_index, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+   }
    return ECAT_ServoStop(slave_index);
 }
 

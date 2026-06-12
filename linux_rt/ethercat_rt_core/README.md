@@ -12,6 +12,8 @@ Current phase:
 - IgH/Xenomai TCP backend server target for Windows GUI/DLL integration.
 - First generic CiA402 motion profile layer for MoveAbs/MoveRel, Jog/MoveVel,
   Stop, and Home command structures.
+- Motion profile selection for `LMS`, `Trapezoidal`, `SCurve`, and
+  `JerkRatio` through the Windows GUI/DLL protocol.
 
 Future phase:
 
