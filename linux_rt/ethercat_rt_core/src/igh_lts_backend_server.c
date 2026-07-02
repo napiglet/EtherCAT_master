@@ -997,6 +997,8 @@ static void *rt_thread_main(void *arg)
    int sequence_failed = 0;
    int sequence_start_cycle = 0;
    int sequence_done_cycle = -1;
+   int idle_hold_valid = 0;
+   int32_t idle_hold_position = 0;
    int result = 1;
    Cia402MotionProfile profile;
 
@@ -1119,6 +1121,7 @@ static void *rt_thread_main(void *arg)
       int sequence_target_reached = 0;
       int cycle_after_sequence = -1;
       Cia402PdoOutput pdo_output;
+      const char *target_policy = "TrackActual";
       int64_t avg_loop_us;
       int64_t print_min_loop_us;
       int safety_stop_active;
@@ -1185,6 +1188,10 @@ static void *rt_thread_main(void *arg)
          sequence_start_cycle = cycle;
          sequence_done_cycle = -1;
          cia402_profile_reset(&profile);
+         if (command.motion.type == CIA402_MOTION_NONE)
+         {
+            idle_hold_valid = 0;
+         }
       }
 
       ecrt_master_receive(master);
@@ -1234,6 +1241,28 @@ static void *rt_thread_main(void *arg)
       pdo_output.target_velocity = command.target_velocity;
       pdo_output.mode = command.mode != 0 ? command.mode : mode_display;
 
+      if (command.motion.type == CIA402_MOTION_NONE)
+      {
+         int track_actual =
+            safety_stop_active ||
+            drive_state != CIA402_STATE_OPERATION_ENABLED ||
+            command.sequence == CIA402_SEQ_DISABLE ||
+            command.sequence == CIA402_SEQ_FAULT_RESET;
+
+         if (track_actual || !idle_hold_valid)
+         {
+            idle_hold_position = actual_position;
+            idle_hold_valid = 1;
+            pdo_output.target_position = actual_position;
+            target_policy = "TrackActual";
+         }
+         else
+         {
+            pdo_output.target_position = idle_hold_position;
+            target_policy = "HoldActual";
+         }
+      }
+
       if (!sequence_done && sequence_target_reached)
       {
          sequence_done = 1;
@@ -1255,6 +1284,7 @@ static void *rt_thread_main(void *arg)
       if (command.motion.type != CIA402_MOTION_NONE &&
           sequence_done && !sequence_failed)
       {
+         target_policy = "MotionProfile";
          profile_done = cia402_profile_step(&profile,
                                             &command.motion,
                                             actual_position,
@@ -1264,6 +1294,7 @@ static void *rt_thread_main(void *arg)
       }
       else if (command.motion.type != CIA402_MOTION_NONE)
       {
+         target_policy = "TrackActual";
          profile_done = 0;
       }
       else
@@ -1296,7 +1327,7 @@ static void *rt_thread_main(void *arg)
       rt->status.runtime.period_us = options.period_us;
       (void)snprintf(rt->status.runtime.state_text,
                      sizeof(rt->status.runtime.state_text),
-                     "IgH %s, slave %s, CiA402 %s, mode %s, seq %s, motion %s%s, profile %s",
+                     "IgH %s, slave %s, CiA402 %s, mode %s, seq %s, motion %s%s, profile %s, tp %s",
                      wc_state_text(domain_state.wc_state),
                      sc_state.operational ? "OP" : "not OP",
                      cia402_status_text(drive_state),
@@ -1308,7 +1339,8 @@ static void *rt_thread_main(void *arg)
                       !safety_stop_active)
                         ? (profile_done ? "/Done" : "/Running")
                         : "",
-                     cia402_profile_type_text(command.motion.profile_type));
+                     cia402_profile_type_text(command.motion.profile_type),
+                     target_policy);
       if (safety_stop_active)
       {
          safe_copy(rt->status.runtime.last_error,

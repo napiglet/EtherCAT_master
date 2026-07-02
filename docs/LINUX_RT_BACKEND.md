@@ -44,6 +44,11 @@ Linux RT Controller
     and deceleration ramping.
   - `Stop`: controlled velocity ramp to zero with CiA402 halt controlword.
   - `Home`: homing mode command structure with velocity ramp support.
+  - When no motion profile is active, the backend tracks the RxPDO Target
+    Position to the TxPDO Actual Position before CiA402 Operation Enabled.
+    After the drive reaches Operation Enabled, that last actual position is
+    held as the target. This prevents the mover from jumping to an old target
+    position when Servo On is requested.
 - `ethercat_dll` can select either backend:
   - `ECAT_BACKEND_WINDOWS_DEBUG`
   - `ECAT_BACKEND_LINUX_RT`

@@ -9,6 +9,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -153,6 +154,15 @@ static void dll_log_callback(int level, const char *message)
 static unsigned short read_u16_le(const unsigned char *data)
 {
    return (unsigned short)(data[0] | ((unsigned short)data[1] << 8));
+}
+
+static int read_i32_le(const unsigned char *data)
+{
+   unsigned int value = (unsigned int)data[0] |
+                        ((unsigned int)data[1] << 8) |
+                        ((unsigned int)data[2] << 16) |
+                        ((unsigned int)data[3] << 24);
+   return (int)(int32_t)value;
 }
 
 static void hex_dump(char *dst, size_t dst_size, const unsigned char *data,
@@ -848,12 +858,26 @@ static void format_pdo_text(char *dst, size_t dst_size, int slave_index)
                                "Input[0..1] as CiA 402 statusword: 0x%04X (%s)\r\n",
                                statusword, ECAT_Cia402StateName(statusword));
    }
+   if (input_size >= 6)
+   {
+      int actual_position = read_i32_le(inputs + 2);
+      used += (size_t)snprintf(dst + used, dst_size - used,
+                               "Input[2..5] as Actual position: %d\r\n",
+                               actual_position);
+   }
    if (output_size >= 2)
    {
       unsigned short controlword = read_u16_le(outputs);
       used += (size_t)snprintf(dst + used, dst_size - used,
                                "Output[0..1] as CiA 402 controlword: 0x%04X\r\n",
                                controlword);
+   }
+   if (output_size >= 6)
+   {
+      int target_position = read_i32_le(outputs + 2);
+      used += (size_t)snprintf(dst + used, dst_size - used,
+                               "Output[2..5] as Target position: %d\r\n",
+                               target_position);
    }
 
    used += (size_t)snprintf(dst + used, dst_size - used,
