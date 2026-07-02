@@ -798,7 +798,8 @@ static int runtime_read_cached_sdo(BackendRuntime *rt,
    ECAT_NetStatus status;
    const ECAT_NetSlaveStatus *slave;
    const uint8_t *data = NULL;
-   uint8_t local[4];
+   uint8_t local[64];
+   const char *text = NULL;
    int size = 0;
 
    memset(reply, 0, sizeof(*reply));
@@ -807,6 +808,192 @@ static int runtime_read_cached_sdo(BackendRuntime *rt,
 
    switch (request->index)
    {
+   case 0x1000:
+      write_le_i32(local, 0x00020192);
+      data = local;
+      size = 4;
+      break;
+   case 0x1001:
+      local[0] = 0;
+      data = local;
+      size = 1;
+      break;
+   case 0x1008:
+      text = slave->name[0] != '\0' ? slave->name : "LTS_MotorDriver1x";
+      data = (const uint8_t *)text;
+      size = (int)strlen(text);
+      break;
+   case 0x1009:
+      text = "3.0.0";
+      data = (const uint8_t *)text;
+      size = (int)strlen(text);
+      break;
+   case 0x100a:
+      text = "2.1.0";
+      data = (const uint8_t *)text;
+      size = (int)strlen(text);
+      break;
+   case 0x1018:
+      switch (request->subindex)
+      {
+      case 0x00:
+         local[0] = 4;
+         data = local;
+         size = 1;
+         break;
+      case 0x01:
+         write_le_i32(local, (int32_t)slave->vendor_id);
+         data = local;
+         size = 4;
+         break;
+      case 0x02:
+         write_le_i32(local, (int32_t)slave->product_code);
+         data = local;
+         size = 4;
+         break;
+      case 0x03:
+         write_le_i32(local, (int32_t)slave->revision);
+         data = local;
+         size = 4;
+         break;
+      case 0x04:
+         write_le_i32(local, (int32_t)slave->serial);
+         data = local;
+         size = 4;
+         break;
+      default:
+         reply->result = -1;
+         return -1;
+      }
+      break;
+   case 0x1600:
+      switch (request->subindex)
+      {
+      case 0x00:
+         local[0] = 5;
+         data = local;
+         size = 1;
+         break;
+      case 0x01:
+         write_le_i32(local, 0x60400010);
+         data = local;
+         size = 4;
+         break;
+      case 0x02:
+         write_le_i32(local, 0x607a0020);
+         data = local;
+         size = 4;
+         break;
+      case 0x03:
+         write_le_i32(local, 0x60ff0020);
+         data = local;
+         size = 4;
+         break;
+      case 0x04:
+         write_le_i32(local, 0x60600008);
+         data = local;
+         size = 4;
+         break;
+      case 0x05:
+         write_le_i32(local, 0x00000018);
+         data = local;
+         size = 4;
+         break;
+      default:
+         reply->result = -1;
+         return -1;
+      }
+      break;
+   case 0x1a00:
+      switch (request->subindex)
+      {
+      case 0x00:
+         local[0] = 5;
+         data = local;
+         size = 1;
+         break;
+      case 0x01:
+         write_le_i32(local, 0x60410010);
+         data = local;
+         size = 4;
+         break;
+      case 0x02:
+         write_le_i32(local, 0x60640020);
+         data = local;
+         size = 4;
+         break;
+      case 0x03:
+         write_le_i32(local, 0x606c0020);
+         data = local;
+         size = 4;
+         break;
+      case 0x04:
+         write_le_i32(local, 0x60610008);
+         data = local;
+         size = 4;
+         break;
+      case 0x05:
+         write_le_i32(local, 0x00000018);
+         data = local;
+         size = 4;
+         break;
+      default:
+         reply->result = -1;
+         return -1;
+      }
+      break;
+   case 0x1c00:
+      local[0] = request->subindex == 0x00 ? 4 : request->subindex;
+      data = local;
+      size = 1;
+      break;
+   case 0x1c12:
+      if (request->subindex == 0x00)
+      {
+         local[0] = 1;
+         data = local;
+         size = 1;
+      }
+      else if (request->subindex == 0x01)
+      {
+         write_le_u16(local, 0x1600);
+         data = local;
+         size = 2;
+      }
+      else
+      {
+         reply->result = -1;
+         return -1;
+      }
+      break;
+   case 0x1c13:
+      if (request->subindex == 0x00)
+      {
+         local[0] = 1;
+         data = local;
+         size = 1;
+      }
+      else if (request->subindex == 0x01)
+      {
+         write_le_u16(local, 0x1a00);
+         data = local;
+         size = 2;
+      }
+      else
+      {
+         reply->result = -1;
+         return -1;
+      }
+      break;
+   case 0x3000:
+   case 0x3001:
+   case 0x3002:
+   case 0x3003:
+   case 0x3004:
+      write_le_i32(local, 0);
+      data = local;
+      size = 4;
+      break;
    case 0x6040:
       write_le_u16(local, slave->controlword);
       data = local;
@@ -851,6 +1038,11 @@ static int runtime_read_cached_sdo(BackendRuntime *rt,
       write_le_u16(local, 0);
       data = local;
       size = 2;
+      break;
+   case 0x6502:
+      write_le_i32(local, 0x0000025e);
+      data = local;
+      size = 4;
       break;
    default:
       reply->result = -1;
@@ -1246,6 +1438,7 @@ static void *rt_thread_main(void *arg)
          int track_actual =
             safety_stop_active ||
             drive_state != CIA402_STATE_OPERATION_ENABLED ||
+            (command.sequence == CIA402_SEQ_ENABLE && !sequence_done) ||
             command.sequence == CIA402_SEQ_DISABLE ||
             command.sequence == CIA402_SEQ_FAULT_RESET;
 

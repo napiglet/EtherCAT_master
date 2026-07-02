@@ -122,6 +122,8 @@ typedef struct ECAT_ServoStatus
    unsigned short statusword;
    unsigned short controlword;
    signed char mode_display;
+   int target_position;
+   int target_velocity;
    int actual_position;
    int actual_velocity;
    unsigned short error_code;

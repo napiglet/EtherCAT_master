@@ -2476,6 +2476,19 @@ static int servo_write_controlword(int slave_index, unsigned short controlword)
    return write_sdo_u16(slave_index, 0x6040, 0, controlword);
 }
 
+static int servo_track_actual_target_once(int slave_index)
+{
+   int actual_position;
+   int result;
+
+   result = read_sdo_i32(slave_index, 0x6064, 0, &actual_position);
+   if (result != ECAT_OK)
+   {
+      return result;
+   }
+   return write_sdo_i32(slave_index, 0x607A, 0, actual_position);
+}
+
 static int return_on_error(int result)
 {
    return result == ECAT_OK ? 0 : result;
@@ -2504,6 +2517,8 @@ int ECAT_ServoGetStatus(int slave_index, ECAT_ServoStatus *status)
    {
       status->mode_display = (signed char)mode;
    }
+   (void)read_sdo_i32(slave_index, 0x607A, 0, &status->target_position);
+   (void)read_sdo_i32(slave_index, 0x60FF, 0, &status->target_velocity);
    (void)read_sdo_i32(slave_index, 0x6064, 0, &status->actual_position);
    (void)read_sdo_i32(slave_index, 0x606C, 0, &status->actual_velocity);
    (void)read_sdo_u16(slave_index, 0x603F, 0, &status->error_code);
@@ -2565,6 +2580,7 @@ int ECAT_ServoEnable(int slave_index)
       Sleep(50);
    }
 
+   (void)servo_track_actual_target_once(slave_index);
    result = return_on_error(servo_write_controlword(slave_index, 0x0006));
    if (result != 0)
    {
