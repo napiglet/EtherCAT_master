@@ -35,6 +35,10 @@ target_compile_options(motion_cia402_test PRIVATE
   $<$<C_COMPILER_ID:GNU>:-Wall -Wextra -Wno-unused-parameter>
 )
 
+if(UNIX AND NOT APPLE)
+  target_link_libraries(motion_cia402_test PRIVATE m)
+endif()
+
 set_target_properties(motion_cia402_test PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
@@ -80,6 +84,7 @@ if(UNIX AND NOT APPLE AND ECAT_RT_CORE_ENABLE_IGH)
       "${ECAT_IGH_LIBRARY}"
       pthread
       rt
+      m
     )
   endforeach()
 

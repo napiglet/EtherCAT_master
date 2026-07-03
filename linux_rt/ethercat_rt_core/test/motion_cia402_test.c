@@ -105,6 +105,58 @@ static void test_profile_types(void)
    }
 }
 
+static void test_scurve_seven_segment_plan(void)
+{
+   Cia402MotionCommand command = make_position_command(10000, 0);
+   Cia402MotionProfile profile;
+   Cia402PdoOutput output = {0};
+   int done = 0;
+   int cycle;
+
+   command.profile_type = CIA402_PROFILE_SCURVE;
+   command.profile_velocity = 1000;
+   command.acceleration = 5000;
+   command.deceleration = 5000;
+
+   cia402_profile_reset(&profile);
+   done = cia402_profile_step(&profile, &command, 0, 0, 1000, &output);
+   check_true("scurve planner active", profile.planner_valid);
+   check_true("scurve planner has duration", profile.planner_total_s > 0.0);
+   check_true("scurve jerk-up segment",
+              profile.planner_segment_time[0] > 0.0);
+   check_true("scurve jerk-down segment",
+              profile.planner_segment_time[2] > 0.0);
+   check_true("scurve cruise or short-move segment",
+              profile.planner_segment_time[3] >= 0.0);
+   check_true("scurve decel jerk segment",
+              profile.planner_segment_time[4] > 0.0);
+   check_true("scurve final jerk segment",
+              profile.planner_segment_time[6] > 0.0);
+   check_true("scurve first output moves forward",
+              output.target_position >= 0);
+   check_true("scurve first output below target",
+              output.target_position < command.target_position);
+
+   for (cycle = 1; cycle < 30000 && !done; ++cycle)
+   {
+      int previous_position = output.target_position;
+      done = cia402_profile_step(&profile, &command,
+                                 output.target_position,
+                                 output.target_velocity,
+                                 1000, &output);
+      check_true("scurve monotonic position",
+                 output.target_position >= previous_position);
+      check_true("scurve upper bound",
+                 output.target_position <= command.target_position);
+      check_true("scurve velocity bound",
+                 output.target_velocity <= command.profile_velocity);
+   }
+
+   check_true("scurve planner completed", done);
+   check_int("scurve planner target", output.target_position, 10000);
+   check_int("scurve planner velocity", output.target_velocity, 0);
+}
+
 static void test_relative_profile(void)
 {
    Cia402MotionCommand command = make_position_command(-50, 1);
@@ -180,6 +232,7 @@ int main(void)
 {
    test_absolute_profile();
    test_profile_types();
+   test_scurve_seven_segment_plan();
    test_relative_profile();
    test_jog_velocity_profile();
    test_stop_profile();

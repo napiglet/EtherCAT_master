@@ -8,6 +8,8 @@
 extern "C" {
 #endif
 
+#define CIA402_SCURVE_SEGMENTS 7
+
 typedef enum Cia402State
 {
    CIA402_STATE_NOT_READY = 0,
@@ -96,6 +98,18 @@ typedef struct Cia402MotionProfile
    double acceleration;
    double deceleration;
    double acceleration_state;
+   int planner_valid;
+   double planner_start_position;
+   double planner_distance;
+   double planner_direction;
+   double planner_elapsed_s;
+   double planner_total_s;
+   double planner_segment_time[CIA402_SCURVE_SEGMENTS];
+   double planner_segment_start_s[CIA402_SCURVE_SEGMENTS];
+   double planner_segment_position[CIA402_SCURVE_SEGMENTS];
+   double planner_segment_velocity[CIA402_SCURVE_SEGMENTS];
+   double planner_segment_acceleration[CIA402_SCURVE_SEGMENTS];
+   double planner_segment_jerk[CIA402_SCURVE_SEGMENTS];
    int profile_type;
    double jerk_ratio;
    int32_t output_position;

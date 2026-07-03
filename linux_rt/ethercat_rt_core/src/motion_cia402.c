@@ -1,12 +1,22 @@
 #include "motion_cia402.h"
 
 #include <limits.h>
+#include <math.h>
 #include <string.h>
 
 #define CIA402_DEFAULT_PROFILE_VELOCITY 1000.0
 #define CIA402_DEFAULT_ACCELERATION 10000.0
 #define CIA402_POSITION_EPSILON 0.5
 #define CIA402_VELOCITY_EPSILON 0.5
+#define CIA402_MIN_JERK_RAMP_TIME_S 0.001
+#define CIA402_SCURVE_SOLVE_ITERATIONS 80
+
+typedef struct ScurvePhase
+{
+   double tj;
+   double ta;
+   double distance;
+} ScurvePhase;
 
 static double abs_double(double value)
 {
@@ -16,6 +26,11 @@ static double abs_double(double value)
 static double max_double(double lhs, double rhs)
 {
    return lhs > rhs ? lhs : rhs;
+}
+
+static double min_double(double lhs, double rhs)
+{
+   return lhs < rhs ? lhs : rhs;
 }
 
 static double clamp_double(double value, double min_value, double max_value)
@@ -634,6 +649,241 @@ static double ramp_velocity_by_profile(Cia402MotionProfile *profile,
    return next_velocity;
 }
 
+static void scurve_phase_from_peak_velocity(double peak_velocity,
+                                            double acceleration,
+                                            double jerk,
+                                            ScurvePhase *phase)
+{
+   double full_tj;
+
+   memset(phase, 0, sizeof(*phase));
+   if (peak_velocity <= 0.0 || acceleration <= 0.0 || jerk <= 0.0)
+   {
+      return;
+   }
+
+   full_tj = acceleration / jerk;
+   if (peak_velocity >= acceleration * full_tj)
+   {
+      phase->tj = full_tj;
+      phase->ta = peak_velocity / acceleration - full_tj;
+      phase->distance =
+         acceleration * phase->tj * phase->tj +
+         1.5 * acceleration * phase->tj * phase->ta +
+         0.5 * acceleration * phase->ta * phase->ta;
+   }
+   else
+   {
+      phase->tj = sqrt(peak_velocity / jerk);
+      phase->ta = 0.0;
+      phase->distance = peak_velocity * phase->tj;
+   }
+}
+
+static double scurve_distance_for_peak_velocity(double peak_velocity,
+                                                double acceleration,
+                                                double deceleration,
+                                                double accel_jerk,
+                                                double decel_jerk)
+{
+   ScurvePhase accel_phase;
+   ScurvePhase decel_phase;
+
+   scurve_phase_from_peak_velocity(peak_velocity, acceleration,
+                                   accel_jerk, &accel_phase);
+   scurve_phase_from_peak_velocity(peak_velocity, deceleration,
+                                   decel_jerk, &decel_phase);
+   return accel_phase.distance + decel_phase.distance;
+}
+
+static void scurve_store_segment(Cia402MotionProfile *profile,
+                                 int segment,
+                                 double start_s,
+                                 double position,
+                                 double velocity,
+                                 double acceleration,
+                                 double jerk,
+                                 double duration)
+{
+   profile->planner_segment_start_s[segment] = start_s;
+   profile->planner_segment_position[segment] = position;
+   profile->planner_segment_velocity[segment] = velocity;
+   profile->planner_segment_acceleration[segment] = acceleration;
+   profile->planner_segment_jerk[segment] = jerk;
+   profile->planner_segment_time[segment] = duration;
+}
+
+static void scurve_advance_segment(double *position,
+                                   double *velocity,
+                                   double *acceleration,
+                                   double jerk,
+                                   double duration)
+{
+   double dt2 = duration * duration;
+   double dt3 = dt2 * duration;
+
+   *position += *velocity * duration +
+                0.5 * (*acceleration) * dt2 +
+                (jerk * dt3) / 6.0;
+   *velocity += (*acceleration) * duration + 0.5 * jerk * dt2;
+   *acceleration += jerk * duration;
+}
+
+static int scurve_build_position_plan(Cia402MotionProfile *profile)
+{
+   double distance;
+   double ramp_time;
+   double accel_jerk;
+   double decel_jerk;
+   double peak_velocity;
+   double cruise_time = 0.0;
+   double accel_decel_distance;
+   ScurvePhase accel_phase;
+   ScurvePhase decel_phase;
+   double segment_time[CIA402_SCURVE_SEGMENTS];
+   double segment_jerk[CIA402_SCURVE_SEGMENTS];
+   double position = 0.0;
+   double velocity = 0.0;
+   double acceleration = 0.0;
+   double elapsed = 0.0;
+   int i;
+
+   profile->planner_valid = 0;
+   profile->planner_elapsed_s = 0.0;
+   profile->planner_total_s = 0.0;
+   memset(profile->planner_segment_time, 0,
+          sizeof(profile->planner_segment_time));
+   memset(profile->planner_segment_start_s, 0,
+          sizeof(profile->planner_segment_start_s));
+   memset(profile->planner_segment_position, 0,
+          sizeof(profile->planner_segment_position));
+   memset(profile->planner_segment_velocity, 0,
+          sizeof(profile->planner_segment_velocity));
+   memset(profile->planner_segment_acceleration, 0,
+          sizeof(profile->planner_segment_acceleration));
+   memset(profile->planner_segment_jerk, 0,
+          sizeof(profile->planner_segment_jerk));
+
+   distance = abs_double(profile->target_position - profile->position);
+   if (distance <= CIA402_POSITION_EPSILON)
+   {
+      return 0;
+   }
+   if (abs_double(profile->velocity) > CIA402_VELOCITY_EPSILON)
+   {
+      return 0;
+   }
+   if (profile->max_velocity <= 0.0 ||
+       profile->acceleration <= 0.0 ||
+       profile->deceleration <= 0.0)
+   {
+      return 0;
+   }
+
+   ramp_time = profile_ramp_time_s(profile);
+   if (ramp_time <= 0.0)
+   {
+      return 0;
+   }
+   ramp_time = max_double(ramp_time, CIA402_MIN_JERK_RAMP_TIME_S);
+   accel_jerk = profile->acceleration / ramp_time;
+   decel_jerk = profile->deceleration / ramp_time;
+   if (accel_jerk <= 0.0 || decel_jerk <= 0.0)
+   {
+      return 0;
+   }
+
+   accel_decel_distance =
+      scurve_distance_for_peak_velocity(profile->max_velocity,
+                                        profile->acceleration,
+                                        profile->deceleration,
+                                        accel_jerk,
+                                        decel_jerk);
+   if (distance >= accel_decel_distance)
+   {
+      peak_velocity = profile->max_velocity;
+      cruise_time = (distance - accel_decel_distance) / peak_velocity;
+   }
+   else
+   {
+      double low = 0.0;
+      double high = profile->max_velocity;
+
+      for (i = 0; i < CIA402_SCURVE_SOLVE_ITERATIONS; ++i)
+      {
+         double mid = (low + high) * 0.5;
+         double mid_distance =
+            scurve_distance_for_peak_velocity(mid,
+                                              profile->acceleration,
+                                              profile->deceleration,
+                                              accel_jerk,
+                                              decel_jerk);
+         if (mid_distance <= distance)
+         {
+            low = mid;
+         }
+         else
+         {
+            high = mid;
+         }
+      }
+      peak_velocity = low;
+      cruise_time = 0.0;
+   }
+
+   if (peak_velocity <= CIA402_VELOCITY_EPSILON)
+   {
+      return 0;
+   }
+
+   scurve_phase_from_peak_velocity(peak_velocity,
+                                   profile->acceleration,
+                                   accel_jerk,
+                                   &accel_phase);
+   scurve_phase_from_peak_velocity(peak_velocity,
+                                   profile->deceleration,
+                                   decel_jerk,
+                                   &decel_phase);
+
+   segment_time[0] = accel_phase.tj;
+   segment_time[1] = accel_phase.ta;
+   segment_time[2] = accel_phase.tj;
+   segment_time[3] = cruise_time;
+   segment_time[4] = decel_phase.tj;
+   segment_time[5] = decel_phase.ta;
+   segment_time[6] = decel_phase.tj;
+
+   segment_jerk[0] = accel_jerk;
+   segment_jerk[1] = 0.0;
+   segment_jerk[2] = -accel_jerk;
+   segment_jerk[3] = 0.0;
+   segment_jerk[4] = -decel_jerk;
+   segment_jerk[5] = 0.0;
+   segment_jerk[6] = decel_jerk;
+
+   for (i = 0; i < CIA402_SCURVE_SEGMENTS; ++i)
+   {
+      scurve_store_segment(profile, i, elapsed, position, velocity,
+                           acceleration, segment_jerk[i], segment_time[i]);
+      scurve_advance_segment(&position, &velocity, &acceleration,
+                             segment_jerk[i], segment_time[i]);
+      elapsed += segment_time[i];
+   }
+
+   if (elapsed <= 0.0)
+   {
+      return 0;
+   }
+
+   profile->planner_valid = 1;
+   profile->planner_start_position = profile->position;
+   profile->planner_distance = distance;
+   profile->planner_direction =
+      profile->target_position >= profile->position ? 1.0 : -1.0;
+   profile->planner_total_s = elapsed;
+   return 1;
+}
+
 static void step_position_profile_trapezoidal(Cia402MotionProfile *profile,
                                               double dt_s)
 {
@@ -706,25 +956,30 @@ static void step_position_profile_trapezoidal(Cia402MotionProfile *profile,
 static void step_position_profile_smooth(Cia402MotionProfile *profile,
                                          double dt_s)
 {
-   double error;
-   double direction;
-   double velocity_along;
-   double next_velocity_along;
-   double stop_distance;
-   double remaining;
-   double target_velocity_along;
-   double target_acceleration;
+   double elapsed;
+   double position;
+   double velocity;
    double acceleration;
+   double tau;
+   double tau2;
+   double tau3;
+   int segment = 0;
+   int i;
 
    if (profile->done)
    {
       return;
    }
 
-   error = profile->target_position - profile->position;
-   remaining = abs_double(error);
-   if (remaining <= CIA402_POSITION_EPSILON &&
-       abs_double(profile->velocity) <= CIA402_VELOCITY_EPSILON)
+   if (!profile->planner_valid &&
+       !scurve_build_position_plan(profile))
+   {
+      step_position_profile_trapezoidal(profile, dt_s);
+      return;
+   }
+
+   profile->planner_elapsed_s += dt_s;
+   if (profile->planner_elapsed_s >= profile->planner_total_s)
    {
       profile->position = profile->target_position;
       profile->velocity = 0.0;
@@ -733,72 +988,44 @@ static void step_position_profile_smooth(Cia402MotionProfile *profile,
       return;
    }
 
-   direction = error >= 0.0 ? 1.0 : -1.0;
-   velocity_along = profile->velocity * direction;
-   if (velocity_along < 0.0)
+   elapsed = clamp_double(profile->planner_elapsed_s, 0.0,
+                          profile->planner_total_s);
+   for (i = 0; i < CIA402_SCURVE_SEGMENTS; ++i)
    {
-      target_velocity_along = 0.0;
-   }
-   else if (velocity_along <= CIA402_VELOCITY_EPSILON)
-   {
-      target_velocity_along = profile->max_velocity;
-   }
-   else
-   {
-      stop_distance = (velocity_along * velocity_along) /
-                      (2.0 * profile->deceleration);
-      target_velocity_along =
-         remaining <= stop_distance + CIA402_POSITION_EPSILON
-            ? 0.0
-            : profile->max_velocity;
+      double start = profile->planner_segment_start_s[i];
+      double end = start + profile->planner_segment_time[i];
+      if (elapsed <= end || i == CIA402_SCURVE_SEGMENTS - 1)
+      {
+         segment = i;
+         break;
+      }
    }
 
-   if (target_velocity_along > velocity_along + CIA402_VELOCITY_EPSILON)
-   {
-      target_acceleration = profile->acceleration;
-   }
-   else if (target_velocity_along < velocity_along - CIA402_VELOCITY_EPSILON)
-   {
-      target_acceleration = -profile->deceleration;
-   }
-   else
-   {
-      target_acceleration = 0.0;
-   }
+   tau = elapsed - profile->planner_segment_start_s[segment];
+   tau = clamp_double(tau, 0.0, profile->planner_segment_time[segment]);
+   tau2 = tau * tau;
+   tau3 = tau2 * tau;
+   position =
+      profile->planner_segment_position[segment] +
+      profile->planner_segment_velocity[segment] * tau +
+      0.5 * profile->planner_segment_acceleration[segment] * tau2 +
+      (profile->planner_segment_jerk[segment] * tau3) / 6.0;
+   velocity =
+      profile->planner_segment_velocity[segment] +
+      profile->planner_segment_acceleration[segment] * tau +
+      0.5 * profile->planner_segment_jerk[segment] * tau2;
+   acceleration =
+      profile->planner_segment_acceleration[segment] +
+      profile->planner_segment_jerk[segment] * tau;
 
-   acceleration = slew_acceleration(profile, target_acceleration, dt_s);
-   next_velocity_along = velocity_along + acceleration * dt_s;
-   if (target_acceleration > 0.0 &&
-       next_velocity_along > target_velocity_along)
-   {
-      next_velocity_along = target_velocity_along;
-   }
-   else if (target_acceleration < 0.0 &&
-            next_velocity_along < target_velocity_along)
-   {
-      next_velocity_along = target_velocity_along;
-   }
+   position = min_double(max_double(position, 0.0), profile->planner_distance);
+   velocity = min_double(max_double(velocity, 0.0), profile->max_velocity);
 
-   if (next_velocity_along < 0.0)
-   {
-      next_velocity_along = 0.0;
-   }
-   if (next_velocity_along > profile->max_velocity)
-   {
-      next_velocity_along = profile->max_velocity;
-   }
-
-   profile->velocity = direction * next_velocity_along;
-   profile->position += profile->velocity * dt_s;
-
-   if ((direction > 0.0 && profile->position >= profile->target_position) ||
-       (direction < 0.0 && profile->position <= profile->target_position))
-   {
-      profile->position = profile->target_position;
-      profile->velocity = 0.0;
-      profile->acceleration_state = 0.0;
-      profile->done = 1;
-   }
+   profile->position =
+      profile->planner_start_position +
+      profile->planner_direction * position;
+   profile->velocity = profile->planner_direction * velocity;
+   profile->acceleration_state = profile->planner_direction * acceleration;
 }
 
 static void step_position_profile(Cia402MotionProfile *profile, double dt_s)
