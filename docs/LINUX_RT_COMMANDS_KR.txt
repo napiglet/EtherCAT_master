@@ -1,0 +1,360 @@
+Linux RT EtherCAT Controller 필수 명령어 정리
+작성일: 2026-07-03
+
+1. 현재 장비 기준 인터페이스 이름
+
+  WiFi / 인터넷 / SSH 관리망
+    wlx588694f13db0
+    예: 10.20.8.x DHCP IP
+
+  Windows GUI PC 직결 LAN
+    enp3s0
+    Linux mini PC: 192.168.100.20/24
+    Windows PC:    192.168.100.10/24
+
+  EtherCAT Slave 연결 LAN
+    enp1s0
+    IgH EtherCAT Master가 사용하는 포트입니다.
+    일반 IP를 넣지 않는 것을 권장합니다.
+
+  예비 / 미사용 LAN
+    enp2s0
+
+
+2. 네트워크 상태 확인
+
+  전체 IP 간단 확인:
+    ip -br addr
+
+  전체 링크 상태 확인:
+    ip -br link
+
+  라우팅 확인:
+    ip route
+
+  네트워크 포트 이름 확인:
+    ls /sys/class/net
+
+  특정 포트 IP 확인:
+    ip -br addr show enp3s0
+    ip -br addr show wlx588694f13db0
+
+  특정 포트 link up/down 확인:
+    ip -br link show enp3s0
+    ip -br link show enp1s0
+
+  LAN 드라이버 확인:
+    ethtool -i enp1s0
+    ethtool -i enp3s0
+
+  케이블 링크 확인:
+    ethtool enp1s0
+    ethtool enp3s0
+
+
+3. WiFi 수동 켜기 / 접속 / 확인
+
+  WiFi 차단 해제:
+    sudo rfkill unblock all
+
+  WiFi 인터페이스 up:
+    sudo ip link set wlx588694f13db0 up
+
+  NetworkManager 사용 여부 확인:
+    nmcli dev status
+
+  NetworkManager가 있는 경우 WiFi 켜기:
+    nmcli radio wifi on
+
+  WiFi 목록 스캔:
+    nmcli dev wifi rescan
+    nmcli dev wifi list
+
+  WiFi 수동 접속:
+    sudo nmcli dev wifi connect "SSID_NAME" password "PASSWORD" ifname wlx588694f13db0
+
+  저장된 WiFi 연결 목록:
+    nmcli con show
+
+  저장된 WiFi 자동 접속 켜기:
+    sudo nmcli con modify "SSID_NAME" connection.autoconnect yes
+
+  저장된 WiFi 수동 연결:
+    sudo nmcli con up "SSID_NAME"
+
+  저장된 WiFi 연결 해제:
+    sudo nmcli con down "SSID_NAME"
+
+  WiFi IP 확인:
+    ip -br addr show wlx588694f13db0
+
+  인터넷 확인:
+    ping -c 4 8.8.8.8
+    ping -c 4 archive.ubuntu.com
+
+
+4. WiFi 재부팅 후 자동 접속 설정 - netplan 방식
+
+  Ubuntu Server minimal 설치 환경에서 NetworkManager 대신 netplan/networkd를 쓰는 경우 사용합니다.
+  SSID_NAME, PASSWORD는 실제 WiFi 정보로 변경하세요.
+
+  기존 netplan 백업:
+    sudo cp -a /etc/netplan /etc/netplan.backup.$(date +%Y%m%d_%H%M%S)
+
+  WiFi 자동 접속 파일 생성:
+    sudo tee /etc/netplan/50-wifi.yaml >/dev/null <<'EOF'
+    network:
+      version: 2
+      renderer: networkd
+      wifis:
+        wlx588694f13db0:
+          dhcp4: true
+          optional: true
+          access-points:
+            "SSID_NAME":
+              password: "PASSWORD"
+    EOF
+
+  권한 설정:
+    sudo chmod 600 /etc/netplan/50-wifi.yaml
+
+  문법 확인 및 적용:
+    sudo netplan generate
+    sudo netplan apply
+
+  적용 확인:
+    ip -br addr show wlx588694f13db0
+    ping -c 4 8.8.8.8
+
+
+5. Windows GUI PC 직결 LAN 고정 IP 설정 - Linux enp3s0
+
+  Linux mini PC의 enp3s0을 Windows PC와 직접 연결하는 포트로 사용합니다.
+  Linux: 192.168.100.20/24
+  Windows: 192.168.100.10/24
+
+  기존 netplan 백업:
+    sudo cp -a /etc/netplan /etc/netplan.backup.$(date +%Y%m%d_%H%M%S)
+
+  enp3s0 고정 IP 설정 파일 생성:
+    sudo tee /etc/netplan/99-enp3s0-static.yaml >/dev/null <<'EOF'
+    network:
+      version: 2
+      ethernets:
+        enp3s0:
+          dhcp4: false
+          dhcp6: false
+          optional: true
+          addresses:
+            - 192.168.100.20/24
+    EOF
+
+  권한 설정:
+    sudo chmod 600 /etc/netplan/99-enp3s0-static.yaml
+
+  문법 확인 및 적용:
+    sudo netplan generate
+    sudo netplan apply
+
+  적용 확인:
+    ip -br addr show enp3s0
+
+  일시적으로만 IP를 다시 넣고 싶을 때:
+    sudo ip addr flush dev enp3s0
+    sudo ip addr add 192.168.100.20/24 dev enp3s0
+    sudo ip link set enp3s0 up
+    ip -br addr show enp3s0
+
+
+6. Windows PC 유선 LAN 설정
+
+  Windows 네트워크 어댑터 IPv4 설정:
+    IP 주소:       192.168.100.10
+    서브넷 마스크: 255.255.255.0
+    기본 게이트웨이: 비움
+    DNS: 비움
+
+  Windows PowerShell에서 Linux mini PC ping:
+    ping 192.168.100.20
+
+  Windows PowerShell에서 backend server 포트 확인:
+    Test-NetConnection 192.168.100.20 -Port 15000
+
+  Windows PowerShell에서 SSH 접속:
+    ssh dev@192.168.100.20
+
+  Linux에서 Windows PC ping:
+    ping -c 2 192.168.100.10
+
+  참고:
+    Windows 방화벽이 ICMP를 막으면 Linux -> Windows ping은 실패할 수 있습니다.
+    Windows -> Linux ping과 Test-NetConnection 15000이 성공하면 GUI 통신에는 보통 문제 없습니다.
+
+
+7. EtherCAT 포트 enp1s0 확인
+
+  EtherCAT 포트는 일반 TCP/IP 통신용이 아니라 Slave 통신용입니다.
+  IgH가 enp1s0을 사용하도록 설정되어 있어야 합니다.
+
+  enp1s0 IP 제거:
+    sudo ip addr flush dev enp1s0
+
+  enp1s0 link up:
+    sudo ip link set enp1s0 up
+
+  IgH EtherCAT 서비스 상태:
+    sudo systemctl status ethercat -l --no-pager
+
+  IgH EtherCAT 서비스 재시작:
+    sudo systemctl restart ethercat
+
+  EtherCAT 커널 모듈 확인:
+    lsmod | grep -Ei "^ec_"
+
+  Master 상태 확인:
+    sudo ethercat master
+
+  Slave 목록 확인:
+    sudo ethercat slaves
+
+  Slave PDO 확인:
+    sudo ethercat pdos -p 0
+
+  Slave OP 전환:
+    sudo ethercat states -p 0 OP
+
+  Slave SAFEOP 전환:
+    sudo ethercat states -p 0 SAFEOP
+
+
+8. 프로젝트 업데이트 / Linux backend 빌드
+
+  프로젝트 폴더 이동:
+    cd ~/EtherCAT_master
+
+  Git 최신 코드 받기:
+    git pull
+
+  Linux Xenomai backend server 빌드:
+    cmake --build build/linux-xenomai --target ethercat_igh_backend_server -j$(nproc)
+
+  필요 시 motion 테스트 빌드:
+    cmake --build build/linux-xenomai --target motion_cia402_test -j$(nproc)
+
+
+9. Linux RT backend server 시작 / 종료
+
+  server 시작:
+    cd ~/EtherCAT_master
+    sudo ./build/linux-xenomai/bin/ethercat_igh_backend_server \
+      --port 15000 \
+      --period-us 1000 \
+      --client-timeout-ms 1000
+
+  정상 메시지 예:
+    IgH LTS backend server listening on TCP port 15000
+    Press Ctrl+C to stop.
+
+  server 정상 종료:
+    Ctrl+C
+
+  Windows GUI 설정:
+    Backend: Linux RT
+    Host:    192.168.100.20
+    Port:    15000
+
+
+10. server 재시작 시 "Address already in use" 해결
+
+  현재 15000 포트 사용 프로세스 확인:
+    sudo ss -ltnp | grep 15000
+
+  예시 출력:
+    LISTEN 0 1 0.0.0.0:15000 0.0.0.0:* users:(("ethercat_igh_ba",pid=15329,fd=3))
+
+  PID로 정상 종료:
+    sudo kill 15329
+
+  프로세스 이름으로 종료:
+    sudo pkill -f ethercat_igh_backend_server
+
+  그래도 남아 있을 때만 강제 종료:
+    sudo kill -9 15329
+
+  포트가 비었는지 확인:
+    sudo ss -ltnp | grep 15000
+
+  아무 출력이 없으면 다시 시작:
+    cd ~/EtherCAT_master
+    sudo ./build/linux-xenomai/bin/ethercat_igh_backend_server \
+      --port 15000 \
+      --period-us 1000 \
+      --client-timeout-ms 1000
+
+  주의:
+    pkill ethercat_igh_backend_server 명령은 프로세스 이름 길이 제한 때문에 실패할 수 있습니다.
+    반드시 -f 옵션을 붙여서 sudo pkill -f ethercat_igh_backend_server 를 사용하세요.
+
+
+11. Windows GUI 접속 문제 빠른 점검 순서
+
+  1) Linux enp3s0 IP 확인:
+    ip -br addr show enp3s0
+
+  2) Windows PC에서 ping:
+    ping 192.168.100.20
+
+  3) Linux server 실행 여부:
+    sudo ss -ltnp | grep 15000
+
+  4) Windows PC에서 TCP 포트 확인:
+    Test-NetConnection 192.168.100.20 -Port 15000
+
+  5) EtherCAT 서비스 확인:
+    sudo systemctl status ethercat -l --no-pager
+    sudo ethercat slaves
+
+  6) GUI 설정 확인:
+    Backend = Linux RT
+    Host    = 192.168.100.20
+    Port    = 15000
+
+  7) 그래도 안 되면 server 재시작:
+    sudo pkill -f ethercat_igh_backend_server
+    cd ~/EtherCAT_master
+    sudo ./build/linux-xenomai/bin/ethercat_igh_backend_server \
+      --port 15000 \
+      --period-us 1000 \
+      --client-timeout-ms 1000
+
+
+12. 재부팅 후 전체 시작 체크리스트
+
+  Linux 로그인 후:
+    ip -br addr
+    ip -br link
+
+  WiFi 인터넷 확인:
+    ip -br addr show wlx588694f13db0
+    ping -c 4 8.8.8.8
+
+  Windows 직결 LAN 확인:
+    ip -br addr show enp3s0
+
+  EtherCAT 서비스 확인:
+    sudo systemctl status ethercat -l --no-pager
+    sudo ethercat slaves
+
+  backend server 실행:
+    cd ~/EtherCAT_master
+    sudo ./build/linux-xenomai/bin/ethercat_igh_backend_server \
+      --port 15000 \
+      --period-us 1000 \
+      --client-timeout-ms 1000
+
+  Windows에서 GUI 실행:
+    Backend: Linux RT
+    Host: 192.168.100.20
+    Port: 15000
+    Connect
+
